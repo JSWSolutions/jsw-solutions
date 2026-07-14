@@ -8,9 +8,10 @@ const connectionString =
   process.env.DATABASE_URL_UNPOOLED ||
   process.env.POSTGRES_URL_NO_SSL;
 
-export const sql = createPool(
+const pool = createPool(
   connectionString ? { connectionString } : undefined,
 );
+export const sql = pool.sql;
 import type { ParsedInvoice } from "./types";
 
 /**
