@@ -17,7 +17,7 @@ export async function extractTextFromPdf(
 function clean(text: string): string {
   // Strip zero-width / non-printable characters that some PDF exporters embed.
   return text
-    .replace(/[​-‍﻿ ]/g, " ")
+    .replace(/[\u200B-\u200D\uFEFF\u00A0]/g, " ")
     .replace(/\r/g, "\n");
 }
 
@@ -62,11 +62,6 @@ function toIsoDate(raw: string | null): string | null {
 
 // ---- the parser -----------------------------------------------------------
 
-/**
- * Parses text extracted from the JSW Solutions service-invoice template.
- * Every field is best-effort; the dashboard always shows the result in an
- * editable form so a human can correct anything before saving.
- */
 export function parseInvoiceText(rawText: string): ParsedInvoice {
   const text = clean(rawText);
 
@@ -74,22 +69,29 @@ export function parseInvoiceText(rawText: string): ParsedInvoice {
   const machine = firstMatch(text, /Machine\s*:?\s*([A-Za-z0-9][A-Za-z0-9\-#\/ ]*?)(?:\n|Date|$)/i);
   const dateRaw = firstMatch(text, /Date\s*:?\s*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i);
 
-  // "PREPARED FOR" holds the customer contact + company.
   const prepared = section(
     text,
     /PREPARED\s+FOR/i,
     [/PROJECT\s*\/?\s*WORK\s+LOCATION/i, /NOTES/i, /LABOR/i],
   );
-  const contact = firstMatch(prepared, /Customer\s+Name\s*:?\s*([^\n]+)/i);
-  const company = firstMatch(prepared, /Customer\s+Company\s*:?\s*([^\n]+)/i);
+  const contact = firstMatch(
+    prepared,
+    /Customer\s+Name\s*:?\s*(.+?)(?:\s+Customer\s+Company|$)/im,
+  );
+  const company = firstMatch(
+    prepared,
+    /Customer\s+Company\s*:?\s*(.+?)(?:\s+Customer\s+(?:Name|Address)|$)/im,
+  );
 
-  // "PROJECT/WORK LOCATION" holds the customer's site address + phone.
   const location = section(
     text,
     /PROJECT\s*\/?\s*WORK\s+LOCATION/i,
     [/NOTES/i, /LABOR/i, /SUMMARY/i],
   );
-  const address = firstMatch(location, /Customer\s+Address\s*:?\s*([^\n]+)/i);
+  const address = firstMatch(
+    location,
+    /Customer\s+Address\s*:?\s*(.+?)(?:\s+City\b|\s+Customer\s+Phone|$)/im,
+  );
   const cityStateZip = /City\s*:?\s*([^\n]*?)\s+State\s*:?\s*([A-Za-z]{2})\s+ZIP\s*:?\s*(\d{4,5})/i.exec(
     location,
   );
@@ -98,16 +100,13 @@ export function parseInvoiceText(rawText: string): ParsedInvoice {
   const zip = cityStateZip ? cityStateZip[3].trim() : null;
   const phone = firstMatch(location, /Customer\s+Phone\s*:?\s*([0-9()\-.\s]{7,})/i);
 
-  // Work summary: between NOTES/SUMMARY and the LABOR table.
   let summary = section(
     text,
     /(?:SUMMARY\s+OF\s+WORK\s+PERFORMED|NOTES)/i,
     [/LABOR\s+INCLUDED/i, /Description\s+Cost/i],
   );
-  // Drop a leading "SUMMARY OF WORK PERFORMED" heading if NOTES matched first.
   summary = summary.replace(/^SUMMARY\s+OF\s+WORK\s+PERFORMED\s*/i, "").trim();
 
-  // Line items in the LABOR INCLUDED table.
   const labor = section(
     text,
     /LABOR\s+INCLUDED/i,
@@ -138,13 +137,6 @@ export function parseInvoiceText(rawText: string): ParsedInvoice {
   };
 }
 
-/**
- * Parses rows like:  SERVICE  $155.00  3.5  $542.50
- *
- * PDF text extractors differ: some preserve one line per row, others flatten
- * the whole table onto a single line. We try line-by-line first (most precise)
- * and fall back to a flattened scan if that finds nothing.
- */
 function parseLineItems(labor: string): LineItem[] {
   if (!labor) return [];
   const byLine = parseLineItemsByLine(labor);
@@ -166,7 +158,6 @@ function parseLineItemsByLine(labor: string): LineItem[] {
     }
     if (/total\s+charge/i.test(line)) continue;
 
-    // description  rate  qty  total
     const full =
       /^([A-Za-z][A-Za-z &\/]+?)\s+\$?\s*([0-9,]+\.?\d*)\s+([0-9]+\.?\d*)\s+\$?\s*([0-9,]+\.?\d*)$/.exec(
         line,
@@ -182,7 +173,6 @@ function parseLineItemsByLine(labor: string): LineItem[] {
       continue;
     }
 
-    // description  total  (parts / flat charges without a rate & qty)
     const simple = /^([A-Za-z][A-Za-z &\/]+?)\s+\$?\s*([0-9,]+\.\d{2})$/.exec(line);
     if (simple) {
       items.push({
@@ -200,7 +190,6 @@ function parseLineItemsByLine(labor: string): LineItem[] {
 function parseLineItemsFlattened(labor: string): LineItem[] {
   const items: LineItem[] = [];
   const flat = labor.replace(/\s+/g, " ").trim();
-  // Single-word uppercase description, $-anchored rate and total, numeric qty.
   const re = /([A-Z][A-Za-z]{2,20})\s+\$\s*([0-9,]+\.?\d*)\s+([0-9]+\.?\d*)\s+\$\s*([0-9,]+\.?\d*)/g;
   let m: RegExpExecArray | null;
   let order = 0;
