@@ -1,22 +1,13 @@
-import { createPool } from "@vercel/postgres";
-
-const connectionString =
-  process.env.POSTGRES_URL ||
-  process.env.DATABASE_URL ||
-  process.env.POSTGRES_PRISMA_URL ||
-  process.env.POSTGRES_URL_NON_POOLING ||
-  process.env.DATABASE_URL_UNPOOLED ||
-  process.env.POSTGRES_URL_NO_SSL;
-
-const pool = createPool(
-  connectionString ? { connectionString } : undefined,
-);
-export const sql = pool.sql;
+import { sql } from "@vercel/postgres";
 import type { ParsedInvoice } from "./types";
+
+// @vercel/postgres's `sql` automatically uses the POSTGRES_URL environment
+// variable (a pooled connection) that Vercel's Neon integration provides.
+// We re-export it so the rest of the app imports the database from one place.
+export { sql };
 
 /**
  * Creates all tables if they don't already exist. Safe to run repeatedly.
- * Called by the db:init script and lazily on first API use.
  */
 export async function initSchema() {
   await sql`
@@ -91,7 +82,6 @@ export async function upsertCustomer(p: {
   `;
   if (existing.rows.length > 0) {
     const id = existing.rows[0].id as number;
-    // Backfill any missing contact details from the new invoice.
     await sql`
       UPDATE customers SET
         contact_name = COALESCE(contact_name, ${p.contact_name ?? null}),
