@@ -23,6 +23,7 @@ const TEAM = [
     name: "Jerry Couturier",
     title: "Senior Service Technician",
     initials: "JC",
+    photo: "/jerry.jpg",
     paragraphs: [
       "Jerry Couturier brings over 30 years of industrial maintenance and field service experience, including more than 20 years specializing in Mitsubishi laser and CNC systems. Since 1994, he has supported manufacturers through preventative maintenance, troubleshooting, repairs, equipment installation, and production support.",
       "His experience includes industrial laser systems, CNC lathes and mills, servo drives, robot welding equipment, hydraulic and pneumatic systems, electrical controls, and industrial automation equipment. Throughout his career, Jerry has built a reputation for solving complex machine issues and helping manufacturers minimize downtime.",
@@ -34,6 +35,7 @@ const TEAM = [
     name: "Marcel Couturier",
     title: "Co-owner | JSW Solutions",
     initials: "MC",
+    photo: "/marcel.jpg",
     paragraphs: [
       "Marcel has over 3 years of experience working with industrial laser and CNC equipment, providing maintenance support, troubleshooting, and service throughout Southeast Michigan.",
       "Marcel earned a Bachelor of Business Administration from the Eastern Michigan University College of Business and focuses on customer relationships, project coordination, and ensuring clients receive responsive and dependable service. His goal is to build long term partnerships with manufacturers by providing practical solutions and reliable support.",
@@ -43,6 +45,7 @@ const TEAM = [
     name: "Mark Blair",
     title: "Training & PLC Solutions Partner",
     initials: "MB",
+    photo: "/mark.jpg",
     paragraphs: [
       "Mark Blair is the owner of National Corporate Training Solutions and brings over 40 years of experience in industrial automation, controls engineering, maintenance, and technical training.",
       "Mark specializes in electrical systems, motor controls, PLC programming, industrial troubleshooting, and workforce development. His expertise includes Allen-Bradley and Siemens PLC platforms, VFDs, HMIs, control panel design, industrial electrical systems, and maintenance training.",
@@ -158,7 +161,12 @@ export default function HomePage() {
         <div className="mt-8 space-y-12">
           {TEAM.map((member) => (
             <div key={member.name} className="flex flex-col gap-6 sm:flex-row">
-              <Avatar initials={member.initials} />
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={member.photo}
+                alt={member.name}
+                className="h-40 w-40 shrink-0 rounded-lg object-cover shadow-md"
+              />
               <div>
                 <h3 className="text-2xl font-bold text-brand-orange">
                   {member.name}
