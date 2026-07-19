@@ -59,10 +59,7 @@ function NavBar() {
     <header className="sticky top-0 z-20 bg-sand/90 backdrop-blur border-b border-black/5">
       <div className="container-page flex items-center justify-between py-3">
         <Link href="/" className="flex items-center gap-3">
-          <Logo className="h-11 w-auto" />
-          <span className="hidden sm:block text-brand-green-dark font-bold tracking-wide">
-            JERRY&apos;S SOLAR AND WIND SOLUTIONS
-          </span>
+          <Logo className="h-16 w-auto" />
         </Link>
         <nav className="hidden md:flex items-center gap-8 text-ink font-medium">
           <a href="#home" className="hover:text-brand-orange">Home</a>
