@@ -15,9 +15,11 @@ export async function extractTextFromPdf(
 // ---- text helpers ---------------------------------------------------------
 
 function clean(text: string): string {
-  // Strip zero-width / non-printable characters that some PDF exporters embed.
+  // Strip zero-width, BOM, nbsp, and directional-formatting marks that Google
+  // Docs / PDF exporters embed between labels and values.
   return text
     .replace(/[\u200B-\u200D\uFEFF\u00A0]/g, " ")
+    .replace(/[\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, "")
     .replace(/\r/g, "\n");
 }
 
@@ -65,9 +67,20 @@ function toIsoDate(raw: string | null): string | null {
 export function parseInvoiceText(rawText: string): ParsedInvoice {
   const text = clean(rawText);
 
-  const po = firstMatch(text, /PO\s*#?\s*:?\s*([A-Za-z0-9][A-Za-z0-9\-\/]*)/i);
-  const machine = firstMatch(text, /Machine\s*:?\s*([A-Za-z0-9][A-Za-z0-9\-#\/ ]*?)(?:\n|Date|$)/i);
-  const dateRaw = firstMatch(text, /Date\s*:?\s*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i);
+  // Look for PO#, Machine, Date only in the header (before the customer block),
+  // and stay on the same line so blank fields don't swallow later text.
+  const hm = /Company\s+Name|PREPARED\s+FOR/i.exec(text);
+  const header = text.slice(0, hm ? hm.index : Math.min(text.length, 400));
+  const po = firstMatch(header, /PO\s*#\s*:?[ \t]*([A-Za-z0-9][A-Za-z0-9\-\/]*)/i);
+  let machine = firstMatch(header, /Machine\s*:?[ \t]*([A-Za-z0-9][A-Za-z0-9#()\-\/ ]*)/i);
+  if (machine) {
+    machine = machine.replace(/\s+/g, " ").trim();
+    machine = machine.replace(/\s+(Date|PO|Number|Website|Company)\b.*$/i, "").trim();
+    if (machine.length > 30 || machine.length < 2 || /^(PO|Date|Company|Website|Number|Address)\b/i.test(machine)) {
+      machine = null;
+    }
+  }
+  const dateRaw = firstMatch(header, /Date\s*:?[ \t]*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i);
 
   const prepared = section(
     text,
@@ -103,7 +116,7 @@ export function parseInvoiceText(rawText: string): ParsedInvoice {
   let summary = section(
     text,
     /(?:SUMMARY\s+OF\s+WORK\s+PERFORMED|NOTES)/i,
-    [/LABOR\s+INCLUDED/i, /Description\s+Cost/i],
+    [/\bNOTES\b/i, /PARTS\s+INCLUDED/i, /LABOR\s+INCLUDED/i, /Description\s+Cost/i],
   );
   summary = summary.replace(/^SUMMARY\s+OF\s+WORK\s+PERFORMED\s*/i, "").trim();
 
@@ -123,7 +136,7 @@ export function parseInvoiceText(rawText: string): ParsedInvoice {
   return {
     po_number: po,
     invoice_date: toIsoDate(dateRaw),
-    machine_id: machine ? machine.replace(/\s+/g, "") : null,
+    machine_id: machine || null,
     customer_company: company,
     customer_contact: contact,
     customer_address: address,
