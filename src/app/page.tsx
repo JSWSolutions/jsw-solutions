@@ -21,11 +21,11 @@ const WHY_POINTS = [
 const TEAM = [
   {
     name: "Jerry Couturier",
-    title: "Senior Service Technician",
+    title: "Founder & Senior Service Technician",
     initials: "JC",
     photo: "/jerry.jpg",
     paragraphs: [
-      "Jerry Couturier brings over 30 years of industrial maintenance and field service experience, including more than 20 years specializing in Mitsubishi laser and CNC systems. Since 1994, he has supported manufacturers through preventative maintenance, troubleshooting, repairs, equipment installation, and production support.",
+      "Jerry Couturier is the founder of JSW Solutions and an eight-year U.S. Army veteran who has worked on high-security contracts. He brings over 30 years of industrial maintenance and field service experience, including more than 20 years specializing in Mitsubishi laser and CNC systems. Since 1994, he has supported manufacturers through preventative maintenance, troubleshooting, repairs, equipment installation, and production support.",
       "His experience includes industrial laser systems, CNC lathes and mills, servo drives, robot welding equipment, hydraulic and pneumatic systems, electrical controls, and industrial automation equipment. Throughout his career, Jerry has built a reputation for solving complex machine issues and helping manufacturers minimize downtime.",
       "Jerry has completed specialized training with industry-leading manufacturers and automation providers, including Mitsubishi Electric, Mori Seiki, GE Fanuc, Siemens, Allen-Bradley, and Control Laser Corporation. His training includes CNC maintenance, advanced laser systems, PLCs, servo systems, industrial hydraulics, and machine tool repair.",
       "He holds an Associate Degree in Electronic Engineering from ITT Technical Institute and graduated with distinction in both Electronics & Repair and Leadership & Management programs. His combination of factory training and decades of hands-on experience provides JSW Solutions customers with dependable expertise when reliability matters most.",
@@ -47,7 +47,7 @@ const TEAM = [
     initials: "MB",
     photo: "/mark.jpg",
     paragraphs: [
-      "Mark Blair is the owner of National Corporate Training Solutions and brings over 40 years of experience in industrial automation, controls engineering, maintenance, and technical training.",
+      "Mark Blair is the owner of National Corporate Training Solutions, an eight-year U.S. Army veteran, and brings over 40 years of experience in industrial automation, controls engineering, maintenance, and technical training.",
       "Mark specializes in electrical systems, motor controls, PLC programming, industrial troubleshooting, and workforce development. His expertise includes Allen-Bradley and Siemens PLC platforms, VFDs, HMIs, control panel design, industrial electrical systems, and maintenance training.",
       "Through our partnership with Mark and National Corporate Training Solutions, JSW Solutions can connect customers with customized technical training, PLC support, and workforce development programs designed to improve troubleshooting skills, increase productivity, and reduce equipment downtime.",
     ],
@@ -196,7 +196,7 @@ export default function HomePage() {
           <p className="mt-2 text-ink/90">
             JSW Solutions LLC &nbsp;·&nbsp; Mailing Address: 1151 Bishop Rd,
             Saline MI 48176 &nbsp;·&nbsp; Email:{" "}
-            <a
+            
               className="text-brand-green-dark underline"
               href="mailto:jsawsolutions@gmail.com"
             >
