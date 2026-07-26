@@ -113,11 +113,18 @@ export async function recomputeAutoMileage(
   // An invoice can cover several separate visit dates. Its billed TRAVEL hours
   // are shared evenly across those dates, so each day gets its own trip and the
   // total miles still equal (all travel hours × rate).
+  //
+  // A TRAVEL line only counts when it was really billed: it needs both hours and
+  // money on it. A zero-dollar or zero-hour travel line logs no miles.
   const tr = await sql`
     SELECT COALESCE(SUM(t.travel / t.ndates), 0) AS travel
     FROM (
       SELECT i.id,
-             COALESCE(SUM(li.qty) FILTER (WHERE upper(li.description) = 'TRAVEL'), 0) AS travel,
+             COALESCE(SUM(li.qty) FILTER (
+               WHERE upper(li.description) = 'TRAVEL'
+                 AND COALESCE(li.qty, 0) > 0
+                 AND COALESCE(li.line_total, 0) > 0
+             ), 0) AS travel,
              GREATEST(COALESCE(array_length(i.service_dates, 1), 1), 1) AS ndates
       FROM invoices i JOIN line_items li ON li.invoice_id = i.id
       WHERE i.customer_id = ${custId}
@@ -235,12 +242,14 @@ export async function deleteInvoice(id: number): Promise<boolean> {
   await initSchema();
   // Grab the customer + every date it covers first, so we can fix mileage after.
   const info = await sql`
-    SELECT c.company AS company
+    SELECT c.company AS company, i.customer_id, i.machine_id
     FROM invoices i LEFT JOIN customers c ON c.id = i.customer_id
     WHERE i.id = ${id} LIMIT 1;
   `;
   if (info.rows.length === 0) return false;
   const company = info.rows[0].company as string | null;
+  const customerId = info.rows[0].customer_id as number | null;
+  const machineId = info.rows[0].machine_id as number | null;
   const dates = await datesForInvoice(id);
 
   // line_items cascade on delete; mileage.invoice_id is set null automatically.
@@ -251,6 +260,31 @@ export async function deleteInvoice(id: number): Promise<boolean> {
     for (const d of dates) {
       await recomputeAutoMileage(company.trim(), d);
     }
+  }
+
+  // Tidy up behind the deletion: a machine or customer that was only ever on
+  // this invoice (a typo or a test entry) shouldn't linger in the lists.
+  if (machineId != null || customerId != null) {
+    await sql`
+      DELETE FROM machines m
+      WHERE (m.id = ${machineId}::int OR m.customer_id = ${customerId}::int)
+        AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.machine_id = m.id);
+    `;
+  }
+  if (customerId != null) {
+    // Their auto mileage goes too — it was only ever generated from invoices.
+    // Anything typed by hand into the mileage log is left alone.
+    await sql`
+      DELETE FROM mileage
+      WHERE source = 'auto'
+        AND lower(customer_name) = lower((SELECT company FROM customers WHERE id = ${customerId}))
+        AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.customer_id = ${customerId});
+    `;
+    await sql`
+      DELETE FROM customers c
+      WHERE c.id = ${customerId}
+        AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.customer_id = c.id);
+    `;
   }
   return true;
 }

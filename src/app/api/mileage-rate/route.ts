@@ -1,7 +1,36 @@
 import { NextResponse } from "next/server";
-import { setCustomerRate } from "@/lib/db";
+import { setCustomerRate, sql, initSchema } from "@/lib/db";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+/**
+ * Looks up one customer's mileage rate. The new-invoice form uses this to spot a
+ * company it has never seen before, so it can ask for a rate before saving.
+ */
+export async function GET(req: Request) {
+  const company = (new URL(req.url).searchParams.get("company") || "").trim();
+  if (!company) {
+    return NextResponse.json({ known: false, mileage_rate: null });
+  }
+  try {
+    await initSchema();
+    const r = await sql`
+      SELECT mileage_rate FROM customers WHERE lower(company) = lower(${company}) LIMIT 1;
+    `;
+    if (r.rows.length === 0) {
+      return NextResponse.json({ known: false, mileage_rate: null });
+    }
+    const raw = r.rows[0].mileage_rate;
+    return NextResponse.json({
+      known: true,
+      mileage_rate: raw == null ? null : Number(raw),
+    });
+  } catch (err) {
+    console.error("Rate lookup failed:", err);
+    return NextResponse.json({ error: "Could not check the customer." }, { status: 500 });
+  }
+}
 
 export async function POST(req: Request) {
   let body: Record<string, unknown>;

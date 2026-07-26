@@ -94,6 +94,10 @@ export default function NewInvoicePage() {
   const [paid, setPaid] = useState(false);
   const [paidDate, setPaidDate] = useState(todayLocal());
   const [checkNo, setCheckNo] = useState("");
+  const [askRate, setAskRate] = useState(false);
+  const [newRate, setNewRate] = useState("");
+  const [rateBusy, setRateBusy] = useState(false);
+  const [rateError, setRateError] = useState("");
 
   const computedTotal = useMemo(
     () => items.reduce((s, li) => s + (Number(li.line_total) || 0), 0),
@@ -169,11 +173,73 @@ export default function NewInvoicePage() {
     setItems((arr) => arr.filter((_, idx) => idx !== i));
   }
 
+  /**
+   * A company we've never billed before has no mileage rate yet, so we ask for
+   * one before the invoice can be saved. Otherwise its trips would never make it
+   * into the mileage log.
+   */
   async function save() {
     if (chosenDates.length === 0) {
       setError("Please pick at least one date the work was done.");
       return;
     }
+    setError("");
+    const company = form.customer_company.trim();
+    if (company) {
+      setSaving(true);
+      try {
+        const res = await fetch(
+          `/api/mileage-rate?company=${encodeURIComponent(company)}`,
+          { cache: "no-store" },
+        );
+        const j = await res.json();
+        if (res.ok && (!j.known || j.mileage_rate == null)) {
+          setSaving(false);
+          setNewRate("");
+          setRateError("");
+          setAskRate(true);
+          return;
+        }
+      } catch {
+        // If the check itself fails, don't block the invoice.
+      }
+      setSaving(false);
+    }
+    await submit();
+  }
+
+  /** Saves the rate the dialog asked for, then carries on with the invoice. */
+  async function saveRateAndContinue() {
+    const n = Number(newRate);
+    if (!newRate.trim() || !Number.isFinite(n) || n < 0) {
+      setRateError("Enter a number of miles. Use 0 if you don't want mileage tracked here.");
+      return;
+    }
+    setRateBusy(true);
+    setRateError("");
+    try {
+      const res = await fetch("/api/mileage-rate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ company: form.customer_company.trim(), mileage_rate: n }),
+      });
+      const j = await res.json();
+      if (!res.ok) {
+        setRateError(j.error || "Could not save the rate.");
+        setRateBusy(false);
+        return;
+      }
+    } catch {
+      setRateError("Could not save the rate.");
+      setRateBusy(false);
+      return;
+    }
+    setRateBusy(false);
+    setAskRate(false);
+    await submit();
+  }
+
+  async function submit() {
     setSaving(true);
     setError("");
     const totalOverride = form.total.trim() ? Number(form.total) : computedTotal;
@@ -450,6 +516,54 @@ export default function NewInvoicePage() {
           {saving ? "Saving…" : "Save invoice"}
         </button>
       </div>
+
+      {askRate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+          <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-5 shadow-xl">
+            <h2 className="text-lg font-bold text-slate-900">New customer — mileage rate</h2>
+            <p className="mt-1 text-sm text-slate-600">
+              This is the first invoice for{" "}
+              <span className="font-semibold">{form.customer_company.trim()}</span>. How many
+              miles do you drive per hour of billed travel time?
+            </p>
+            <label className="mt-4 block">
+              <span className="text-sm font-medium text-slate-600">Miles per travel hour</span>
+              <div className="mt-1 flex items-center gap-2">
+                <input
+                  value={newRate}
+                  onChange={(e) => setNewRate(e.target.value)}
+                  placeholder="e.g. 45"
+                  inputMode="decimal"
+                  autoFocus
+                  className="w-32 rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-orange"
+                />
+                <span className="text-sm text-slate-400">mi / hr</span>
+              </div>
+            </label>
+            <p className="mt-2 text-xs text-slate-500">
+              Enter 0 if you don&apos;t want mileage tracked for this customer. You can change
+              this any time on the Mileage tab.
+            </p>
+            {rateError && <p className="mt-3 text-sm font-medium text-red-600">{rateError}</p>}
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={() => setAskRate(false)}
+                disabled={rateBusy}
+                className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Back to invoice
+              </button>
+              <button
+                onClick={saveRateAndContinue}
+                disabled={rateBusy}
+                className="rounded-md bg-brand-orange px-4 py-2 text-sm font-semibold text-white hover:bg-brand-orange-dark disabled:opacity-50"
+              >
+                {rateBusy ? "Saving…" : "Save rate & invoice"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
