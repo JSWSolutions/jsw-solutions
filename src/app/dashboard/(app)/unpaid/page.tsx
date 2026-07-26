@@ -3,10 +3,6 @@ import Link from "next/link";
 import { getInvoices } from "@/lib/queries";
 import { money, shortDate } from "@/lib/format";
 import { MarkPaidButton } from "@/components/dashboard/MarkPaidButton";
-import { sql } from "@/lib/db";
-
-// TEMPORARY — remove the banner below once the dashboard is confirmed live.
-const BUILD_MARKER = "DIAG-A1";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -23,17 +19,8 @@ export default async function UnpaidPage() {
   const invoices = await getInvoices({ paid: false, limit: 500 });
   const outstanding = invoices.reduce((s, i) => s + i.total, 0);
 
-  const probe = await sql`
-    SELECT count(*) AS invoices, count(*) FILTER (WHERE NOT paid) AS unpaid FROM invoices;
-  `;
-  const renderedAt = new Date().toISOString();
-
   return (
     <div className="space-y-6">
-      <div className="rounded-lg border border-slate-300 bg-slate-50 px-4 py-2 font-mono text-xs text-slate-600">
-        {BUILD_MARKER} · rendered {renderedAt} · db says {String(probe.rows[0].invoices)} invoices /{" "}
-        {String(probe.rows[0].unpaid)} unpaid · this page listed {invoices.length}
-      </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-extrabold text-slate-900">Unpaid Invoices</h1>
         <div className="rounded-xl border border-brand-orange/30 bg-brand-orange/10 px-5 py-3">
