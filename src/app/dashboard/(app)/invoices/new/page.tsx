@@ -14,12 +14,15 @@ function todayLocal(): string {
   return `${d.getFullYear()}-${m}-${day}`;
 }
 
+/** How many days of a range we're willing to list in the confirm dialog. */
+const MAX_RANGE_DAYS = 31;
+
 /**
- * Older invoices were entered as a start–end range. If a PDF still parses that
- * way, turn the range into the individual days it covers (up to 5) so the new
- * form can show them as separate date boxes.
+ * Some invoices are written as a start–end range. A range says nothing about
+ * which days were actually worked, so we list every day it covers and let the
+ * dialog ask which ones to keep.
  */
-function expandRange(start: string | null, end: string | null): string[] {
+function daysInRange(start: string | null, end: string | null): string[] {
   if (!start) return [];
   if (!end || end === start) return [start];
   const out: string[] = [];
@@ -28,12 +31,23 @@ function expandRange(start: string | null, end: string | null): string[] {
   if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to < from) {
     return [start];
   }
-  for (let d = from; d <= to && out.length < MAX_DATES; d.setDate(d.getDate() + 1)) {
+  for (let d = from; d <= to && out.length < MAX_RANGE_DAYS; d.setDate(d.getDate() + 1)) {
     const m = `${d.getMonth() + 1}`.padStart(2, "0");
     const day = `${d.getDate()}`.padStart(2, "0");
     out.push(`${d.getFullYear()}-${m}-${day}`);
   }
   return out;
+}
+
+/** "Mon, Jul 6" — so weekends are obvious at a glance in the confirm list. */
+function dayLabel(iso: string): string {
+  const d = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
 }
 
 type FormState = {
@@ -98,6 +112,10 @@ export default function NewInvoicePage() {
   const [newRate, setNewRate] = useState("");
   const [rateBusy, setRateBusy] = useState(false);
   const [rateError, setRateError] = useState("");
+  const [askRange, setAskRange] = useState(false);
+  const [rangeDays, setRangeDays] = useState<string[]>([]);
+  const [rangePicked, setRangePicked] = useState<string[]>([]);
+  const [rangeError, setRangeError] = useState("");
 
   const computedTotal = useMemo(
     () => items.reduce((s, li) => s + (Number(li.line_total) || 0), 0),
@@ -142,10 +160,25 @@ export default function NewInvoicePage() {
       }
       const parsed = json.parsed as ParsedInvoice;
       setForm(parsedToForm(parsed));
-      const found = parsed.service_dates?.length
-        ? parsed.service_dates.slice(0, MAX_DATES)
-        : expandRange(parsed.invoice_date, parsed.invoice_date_end);
-      setDates(found.length ? found : [""]);
+
+      // The PDF gave us specific days — use them as-is.
+      if (parsed.service_dates?.length) {
+        setDates(parsed.service_dates.slice(0, MAX_DATES));
+      } else {
+        const span = daysInRange(parsed.invoice_date, parsed.invoice_date_end);
+        if (span.length > 1) {
+          // It was written as a range. A range doesn't tell us which days were
+          // actually worked, so ask before filling anything in.
+          setRangeDays(span);
+          setRangePicked(span.length <= MAX_DATES ? span : []);
+          setRangeError("");
+          setAskRange(true);
+          setDates([""]);
+        } else {
+          setDates(span.length ? span : [""]);
+        }
+      }
+
       setItems(parsed.line_items ?? []);
       setPdfUrl(json.pdfUrl ?? null);
       setNotice(
@@ -158,6 +191,29 @@ export default function NewInvoicePage() {
     } finally {
       setParsing(false);
     }
+  }
+
+  function toggleRangeDay(iso: string) {
+    setRangeError("");
+    setRangePicked((arr) =>
+      arr.includes(iso) ? arr.filter((d) => d !== iso) : [...arr, iso].sort(),
+    );
+  }
+
+  /** Puts the confirmed days into the form's date boxes. */
+  function confirmRange() {
+    if (rangePicked.length === 0) {
+      setRangeError("Tick at least one day you were on site.");
+      return;
+    }
+    if (rangePicked.length > MAX_DATES) {
+      setRangeError(
+        `That's ${rangePicked.length} days — an invoice can hold up to ${MAX_DATES}. Untick a few, or split it into two invoices.`,
+      );
+      return;
+    }
+    setDates([...rangePicked].sort());
+    setAskRange(false);
   }
 
   function updateItem(i: number, patch: Partial<LineItem>) {
@@ -516,6 +572,61 @@ export default function NewInvoicePage() {
           {saving ? "Saving…" : "Save invoice"}
         </button>
       </div>
+
+      {askRange && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+          <div className="flex max-h-[85vh] w-full max-w-sm flex-col rounded-xl border border-slate-200 bg-white p-5 shadow-xl">
+            <h2 className="text-lg font-bold text-slate-900">Which days were you on site?</h2>
+            <p className="mt-1 text-sm text-slate-600">
+              This invoice is written as a date range, so we don&apos;t know which days you
+              actually worked. Tick the days you were there — up to {MAX_DATES}. Travel time is
+              split evenly across them for the mileage log.
+            </p>
+
+            <div className="mt-4 flex-1 space-y-1 overflow-y-auto rounded-lg border border-slate-200 p-2">
+              {rangeDays.map((d) => (
+                <label
+                  key={d}
+                  className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-2 hover:bg-slate-50"
+                >
+                  <input
+                    type="checkbox"
+                    checked={rangePicked.includes(d)}
+                    onChange={() => toggleRangeDay(d)}
+                    className="h-4 w-4 accent-brand-orange"
+                  />
+                  <span className="text-sm text-slate-800">{dayLabel(d)}</span>
+                </label>
+              ))}
+            </div>
+
+            <p className="mt-2 text-xs text-slate-500">
+              {rangePicked.length} of {MAX_DATES} selected
+            </p>
+            {rangeError && (
+              <p className="mt-2 text-sm font-medium text-red-600">{rangeError}</p>
+            )}
+
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setAskRange(false);
+                  setDates([""]);
+                }}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+              >
+                I&apos;ll type them
+              </button>
+              <button
+                onClick={confirmRange}
+                className="rounded-lg bg-brand-orange px-4 py-2 text-sm font-semibold text-white hover:bg-brand-orange-dark"
+              >
+                Use these days
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {askRate && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
