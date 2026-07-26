@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { getInvoiceById } from "@/lib/queries";
 import { money, shortDate } from "@/lib/format";
 import { MarkPaidButton } from "@/components/dashboard/MarkPaidButton";
+import { DeleteInvoiceButton } from "@/components/dashboard/DeleteInvoiceButton";
 
 function dateRange(start: string | null, end: string | null): string {
   if (!start) return "—";
@@ -117,6 +118,10 @@ export default async function InvoiceDetailPage({
             </table>
           </div>
         )}
+      </div>
+
+      <div className="flex justify-end">
+        <DeleteInvoiceButton id={inv.id} />
       </div>
     </div>
   );

@@ -112,7 +112,16 @@ export async function recomputeAutoMileage(
   `;
   const travel = Number(tr.rows[0].travel) || 0;
   const miles = Math.round(travel * Number(rate) * 10) / 10;
-  if (miles <= 0) return; // no travel billed that day → nothing to log
+  if (miles <= 0) {
+    // No travel billed that day anymore (e.g. the invoice was deleted) — remove
+    // any auto row we previously created so the mileage log stays accurate.
+    await sql`
+      DELETE FROM mileage
+      WHERE source = 'auto' AND entry_date = ${date}
+        AND lower(customer_name) = lower(${company});
+    `;
+    return;
+  }
 
   const rr = await sql`
     SELECT upper(li.description) AS d
@@ -158,6 +167,33 @@ export async function setCustomerRate(company: string, rate: number | null): Pro
 export async function setInvoicePaid(id: number, paid: boolean): Promise<void> {
   await initSchema();
   await sql`UPDATE invoices SET paid = ${paid} WHERE id = ${id};`;
+}
+
+/**
+ * Deletes an invoice and its line items, then recomputes that customer/date's
+ * auto mileage so the mileage log reflects the removal. Returns false if the
+ * invoice didn't exist.
+ */
+export async function deleteInvoice(id: number): Promise<boolean> {
+  await initSchema();
+  // Grab the customer + date first so we can fix mileage afterwards.
+  const info = await sql`
+    SELECT c.company AS company, to_char(i.invoice_date, 'YYYY-MM-DD') AS d
+    FROM invoices i LEFT JOIN customers c ON c.id = i.customer_id
+    WHERE i.id = ${id} LIMIT 1;
+  `;
+  if (info.rows.length === 0) return false;
+  const company = info.rows[0].company as string | null;
+  const date = info.rows[0].d as string | null;
+
+  // line_items cascade on delete; mileage.invoice_id is set null automatically.
+  await sql`DELETE FROM invoices WHERE id = ${id};`;
+
+  // Recompute the auto trip for that day (removes/reduces it if travel changed).
+  if (company && date) {
+    await recomputeAutoMileage(company.trim(), date);
+  }
+  return true;
 }
 
 /** Adds a manual mileage entry (for non-invoice business driving). */

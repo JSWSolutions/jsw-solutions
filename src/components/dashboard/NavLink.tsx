@@ -17,6 +17,7 @@ export function NavLink({
   return (
     <Link
       href={href}
+      prefetch={false}
       className={`block rounded-md px-3 py-2 text-sm font-medium transition ${
         active
           ? "bg-brand-orange text-white"
