@@ -1,3 +1,4 @@
+import { unstable_noStore as noStore } from "next/cache";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getInvoiceById } from "@/lib/queries";
@@ -12,12 +13,15 @@ function dateRange(start: string | null, end: string | null): string {
 }
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const fetchCache = "force-no-store";
 
 export default async function InvoiceDetailPage({
   params,
 }: {
   params: { id: string };
 }) {
+  noStore();
   const id = Number(params.id);
   if (!Number.isFinite(id)) notFound();
   const inv = await getInvoiceById(id);

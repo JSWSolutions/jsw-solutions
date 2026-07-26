@@ -48,6 +48,15 @@ export async function middleware(req: NextRequest) {
     return redirect;
   }
 
-  if (rewritten) return NextResponse.rewrite(url);
-  return NextResponse.next();
+  const res = rewritten ? NextResponse.rewrite(url) : NextResponse.next();
+
+  // The dashboard shows live business data. Never let a browser, a proxy, or
+  // the Vercel edge network hand back a saved copy of these pages.
+  if (path.startsWith("/dashboard") || path.startsWith("/api/")) {
+    res.headers.set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+    res.headers.set("CDN-Cache-Control", "no-store");
+    res.headers.set("Vercel-CDN-Cache-Control", "no-store");
+    res.headers.set("Pragma", "no-cache");
+  }
+  return res;
 }

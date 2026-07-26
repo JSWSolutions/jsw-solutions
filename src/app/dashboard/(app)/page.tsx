@@ -1,3 +1,4 @@
+import { unstable_noStore as noStore } from "next/cache";
 import Link from "next/link";
 import {
   getDashboardTotals,
@@ -8,6 +9,8 @@ import {
 import { money, monthLabel } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const fetchCache = "force-no-store";
 
 function Stat({
   label,
@@ -33,6 +36,7 @@ function Stat({
 }
 
 export default async function OverviewPage() {
+  noStore();
   const [totals, monthly, yearly, work] = await Promise.all([
     getDashboardTotals(),
     getMonthlyIncome(18),

@@ -4,6 +4,8 @@ import { sql } from "@/lib/db";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// TEMPORARY diagnostic. Reports which database the live app is actually
+// connected to and what it sees. Delete this file after we've read it.
 export async function GET() {
   try {
     const r = await sql`
@@ -17,9 +19,10 @@ export async function GET() {
       process.env.DATABASE_URL ||
       process.env.POSTGRES_PRISMA_URL ||
       "";
+    // Strip credentials + path so only the host (ep-....neon.tech) shows.
     const host = raw.replace(/^.*@/, "").replace(/[/?].*$/, "");
     return NextResponse.json({
-      connected_host: host || "(none found)",
+      connected_host: host || "(no connection string found)",
       env_used: process.env.POSTGRES_URL
         ? "POSTGRES_URL"
         : process.env.DATABASE_URL

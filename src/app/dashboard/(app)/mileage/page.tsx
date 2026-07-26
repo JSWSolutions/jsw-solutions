@@ -1,9 +1,12 @@
+import { unstable_noStore as noStore } from "next/cache";
 import { getMileageLog, getMileageTotals, getMileageByYear, getCustomerRates } from "@/lib/queries";
 import { shortDate } from "@/lib/format";
 import { ManualMileageForm } from "@/components/dashboard/ManualMileageForm";
 import { RateEditor } from "@/components/dashboard/RateEditor";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const fetchCache = "force-no-store";
 
 const miles = (n: number) =>
   n.toLocaleString("en-US", { maximumFractionDigits: 1 }) + " mi";
@@ -18,6 +21,7 @@ function Stat({ label, value, accent = false }: { label: string; value: string; 
 }
 
 export default async function MileagePage() {
+  noStore();
   const [totals, log, byYear, rates] = await Promise.all([
     getMileageTotals(),
     getMileageLog(),
