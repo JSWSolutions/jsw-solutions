@@ -35,11 +35,14 @@ export interface Invoice {
   po_number: string | null;
   invoice_date: string | null; // ISO yyyy-mm-dd (start date)
   invoice_date_end: string | null; // ISO yyyy-mm-dd (end date, for ranges)
+  service_dates: string[] | null; // up to 5 individual visit dates (newer invoices)
   customer_id: number | null;
   machine_id: number | null;
   work_summary: string | null;
   total: number;
   paid: boolean;
+  paid_date: string | null; // ISO yyyy-mm-dd, set when marked paid
+  check_number: string | null; // customer's check number, if they paid by check
   pdf_url: string | null;
   created_at: string;
 }
@@ -57,6 +60,7 @@ export interface ParsedInvoice {
   po_number: string | null;
   invoice_date: string | null; // ISO yyyy-mm-dd (start)
   invoice_date_end: string | null; // ISO yyyy-mm-dd (end, or null)
+  service_dates?: string[] | null; // up to 5 individual visit dates
   machine_id: string | null;
   customer_company: string | null;
   customer_contact: string | null;

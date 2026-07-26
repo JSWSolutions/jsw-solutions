@@ -70,6 +70,12 @@ export async function initSchema() {
   await sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS invoice_date_end DATE;`;
   await sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS paid BOOLEAN NOT NULL DEFAULT false;`;
   await sql`ALTER TABLE customers ADD COLUMN IF NOT EXISTS mileage_rate NUMERIC(10,3);`;
+  // Payment details, filled in when an invoice is marked paid.
+  await sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS paid_date DATE;`;
+  await sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS check_number TEXT;`;
+  // Up to 5 individual visit dates. NULL on older invoices, which keep using
+  // invoice_date / invoice_date_end as a range.
+  await sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS service_dates DATE[];`;
 
   await sql`
     CREATE TABLE IF NOT EXISTS mileage (
@@ -104,11 +110,23 @@ export async function recomputeAutoMileage(
   if (rate == null) return; // no rate configured yet
   const custId = c.rows[0].id as number;
 
+  // An invoice can cover several separate visit dates. Its billed TRAVEL hours
+  // are shared evenly across those dates, so each day gets its own trip and the
+  // total miles still equal (all travel hours × rate).
   const tr = await sql`
-    SELECT COALESCE(SUM(li.qty), 0) AS travel
-    FROM line_items li JOIN invoices i ON i.id = li.invoice_id
-    WHERE i.customer_id = ${custId} AND i.invoice_date = ${date}
-      AND upper(li.description) = 'TRAVEL';
+    SELECT COALESCE(SUM(t.travel / t.ndates), 0) AS travel
+    FROM (
+      SELECT i.id,
+             COALESCE(SUM(li.qty) FILTER (WHERE upper(li.description) = 'TRAVEL'), 0) AS travel,
+             GREATEST(COALESCE(array_length(i.service_dates, 1), 1), 1) AS ndates
+      FROM invoices i JOIN line_items li ON li.invoice_id = i.id
+      WHERE i.customer_id = ${custId}
+        AND (
+          (i.service_dates IS NOT NULL AND ${date}::date = ANY (i.service_dates))
+          OR (i.service_dates IS NULL AND i.invoice_date = ${date}::date)
+        )
+      GROUP BY i.id
+    ) t;
   `;
   const travel = Number(tr.rows[0].travel) || 0;
   const miles = Math.round(travel * Number(rate) * 10) / 10;
@@ -126,7 +144,11 @@ export async function recomputeAutoMileage(
   const rr = await sql`
     SELECT upper(li.description) AS d
     FROM line_items li JOIN invoices i ON i.id = li.invoice_id
-    WHERE i.customer_id = ${custId} AND i.invoice_date = ${date}
+    WHERE i.customer_id = ${custId}
+      AND (
+        (i.service_dates IS NOT NULL AND ${date}::date = ANY (i.service_dates))
+        OR (i.service_dates IS NULL AND i.invoice_date = ${date}::date)
+      )
       AND upper(li.description) NOT IN ('TRAVEL', 'PARTS')
     LIMIT 1;
   `;
@@ -154,19 +176,54 @@ export async function setCustomerRate(company: string, rate: number | null): Pro
   }
   if (rate == null) return;
   const dates = await sql`
-    SELECT DISTINCT to_char(i.invoice_date, 'YYYY-MM-DD') AS d
-    FROM invoices i JOIN customers c ON c.id = i.customer_id
-    WHERE lower(c.company) = lower(${company}) AND i.invoice_date IS NOT NULL;
+    SELECT DISTINCT to_char(d, 'YYYY-MM-DD') AS d
+    FROM invoices i JOIN customers c ON c.id = i.customer_id,
+         LATERAL unnest(COALESCE(i.service_dates, ARRAY[i.invoice_date])) AS d
+    WHERE lower(c.company) = lower(${company}) AND d IS NOT NULL;
   `;
   for (const row of dates.rows) {
     await recomputeAutoMileage(company, row.d as string);
   }
 }
 
-/** Flips an invoice's paid status. */
-export async function setInvoicePaid(id: number, paid: boolean): Promise<void> {
+/**
+ * Flips an invoice's paid status. When marking paid we also record when it was
+ * paid (defaults to today) and the check number if there was one. Marking it
+ * back to unpaid clears both, so stale payment details never linger.
+ */
+export async function setInvoicePaid(
+  id: number,
+  paid: boolean,
+  details: { paid_date?: string | null; check_number?: string | null } = {},
+): Promise<void> {
   await initSchema();
-  await sql`UPDATE invoices SET paid = ${paid} WHERE id = ${id};`;
+  if (!paid) {
+    await sql`
+      UPDATE invoices SET paid = false, paid_date = NULL, check_number = NULL
+      WHERE id = ${id};
+    `;
+    return;
+  }
+  const when = details.paid_date?.trim() ? details.paid_date.trim() : null;
+  const check = details.check_number?.trim() ? details.check_number.trim() : null;
+  await sql`
+    UPDATE invoices
+       SET paid = true,
+           paid_date = COALESCE(${when}::date, CURRENT_DATE),
+           check_number = ${check}
+     WHERE id = ${id};
+  `;
+}
+
+/** Every calendar date an invoice covers: its chosen visit dates, or its single date. */
+async function datesForInvoice(id: number): Promise<string[]> {
+  const r = await sql`
+    SELECT to_char(d, 'YYYY-MM-DD') AS d
+    FROM invoices i,
+         LATERAL unnest(COALESCE(i.service_dates, ARRAY[i.invoice_date])) AS d
+    WHERE i.id = ${id} AND d IS NOT NULL;
+  `;
+  return r.rows.map((row) => row.d as string);
 }
 
 /**
@@ -176,22 +233,24 @@ export async function setInvoicePaid(id: number, paid: boolean): Promise<void> {
  */
 export async function deleteInvoice(id: number): Promise<boolean> {
   await initSchema();
-  // Grab the customer + date first so we can fix mileage afterwards.
+  // Grab the customer + every date it covers first, so we can fix mileage after.
   const info = await sql`
-    SELECT c.company AS company, to_char(i.invoice_date, 'YYYY-MM-DD') AS d
+    SELECT c.company AS company
     FROM invoices i LEFT JOIN customers c ON c.id = i.customer_id
     WHERE i.id = ${id} LIMIT 1;
   `;
   if (info.rows.length === 0) return false;
   const company = info.rows[0].company as string | null;
-  const date = info.rows[0].d as string | null;
+  const dates = await datesForInvoice(id);
 
   // line_items cascade on delete; mileage.invoice_id is set null automatically.
   await sql`DELETE FROM invoices WHERE id = ${id};`;
 
-  // Recompute the auto trip for that day (removes/reduces it if travel changed).
-  if (company && date) {
-    await recomputeAutoMileage(company.trim(), date);
+  // Recompute each affected day (removes/reduces the trip if travel changed).
+  if (company) {
+    for (const d of dates) {
+      await recomputeAutoMileage(company.trim(), d);
+    }
   }
   return true;
 }
@@ -282,7 +341,7 @@ export async function upsertMachine(
 export async function saveInvoice(
   data: ParsedInvoice,
   pdfUrl: string | null,
-  opts: { paid?: boolean } = {},
+  opts: { paid?: boolean; paid_date?: string | null; check_number?: string | null } = {},
 ): Promise<number> {
   await initSchema();
 
@@ -305,10 +364,34 @@ export async function saveInvoice(
   }
 
   const paid = opts.paid ?? false; // new invoices start Unpaid
+
+  // Up to 5 individual visit dates. Stored as a CSV string and split in SQL so
+  // we don't depend on the driver's array handling. The earliest date is also
+  // kept in invoice_date, which is what every list and sort already uses.
+  const chosen = (data.service_dates ?? [])
+    .map((d) => (d || "").trim())
+    .filter(Boolean)
+    .sort()
+    .slice(0, 5);
+  const uniqueDates = Array.from(new Set(chosen));
+  const datesCsv = uniqueDates.length > 0 ? uniqueDates.join(",") : null;
+  const primaryDate = uniqueDates[0] ?? data.invoice_date ?? null;
+  // A multi-date invoice has no range; a single-date one keeps the old behaviour.
+  const endDate = uniqueDates.length > 0 ? null : data.invoice_date_end ?? null;
+
+  const paidDate = opts.paid_date?.trim() ? opts.paid_date.trim() : null;
+  const checkNumber = opts.check_number?.trim() ? opts.check_number.trim() : null;
+
   const invoice = await sql`
-    INSERT INTO invoices (po_number, invoice_date, invoice_date_end, customer_id, machine_id, work_summary, total, paid, pdf_url)
-    VALUES (${data.po_number}, ${data.invoice_date}, ${data.invoice_date_end ?? null}, ${customerId}, ${machineId},
-            ${data.work_summary}, ${data.total}, ${paid}, ${pdfUrl})
+    INSERT INTO invoices (po_number, invoice_date, invoice_date_end, service_dates,
+                          customer_id, machine_id, work_summary, total, paid,
+                          paid_date, check_number, pdf_url)
+    VALUES (${data.po_number}, ${primaryDate}, ${endDate},
+            string_to_array(${datesCsv}::text, ',')::date[],
+            ${customerId}, ${machineId}, ${data.work_summary}, ${data.total}, ${paid},
+            CASE WHEN ${paid}::boolean THEN COALESCE(${paidDate}::date, CURRENT_DATE) END,
+            CASE WHEN ${paid}::boolean THEN ${checkNumber}::text END,
+            ${pdfUrl})
     RETURNING id;
   `;
   const invoiceId = invoice.rows[0].id as number;
@@ -322,8 +405,10 @@ export async function saveInvoice(
   }
 
   // Auto-log mileage (one trip per customer per date). Independent of paid status.
-  if (data.customer_company && data.customer_company.trim() && data.invoice_date) {
-    await recomputeAutoMileage(data.customer_company.trim(), data.invoice_date);
+  if (data.customer_company && data.customer_company.trim()) {
+    for (const d of await datesForInvoice(invoiceId)) {
+      await recomputeAutoMileage(data.customer_company.trim(), d);
+    }
   }
 
   return invoiceId;

@@ -182,6 +182,11 @@ function mapInvoiceRow(row: Record<string, unknown>): Omit<InvoiceFull, "line_it
     po_number: (row.po_number as string) ?? null,
     invoice_date: (row.invoice_date_str as string) ?? null,
     invoice_date_end: (row.invoice_date_end_str as string) ?? null,
+    service_dates: Array.isArray(row.service_dates_str)
+      ? (row.service_dates_str as string[])
+      : null,
+    paid_date: (row.paid_date_str as string) ?? null,
+    check_number: (row.check_number as string) ?? null,
     customer_id: row.customer_id == null ? null : num(row.customer_id),
     machine_id: row.machine_id == null ? null : num(row.machine_id),
     work_summary: (row.work_summary as string) ?? null,
@@ -212,6 +217,11 @@ export async function getInvoices(f: InvoiceFilters = {}): Promise<InvoiceFull[]
   const r = await sql`
     SELECT i.id, i.po_number, to_char(i.invoice_date, 'YYYY-MM-DD') AS invoice_date_str,
            to_char(i.invoice_date_end, 'YYYY-MM-DD') AS invoice_date_end_str,
+           CASE WHEN i.service_dates IS NULL THEN NULL ELSE
+             (SELECT array_agg(to_char(d, 'YYYY-MM-DD') ORDER BY d)
+              FROM unnest(i.service_dates) AS d)
+           END AS service_dates_str,
+           to_char(i.paid_date, 'YYYY-MM-DD') AS paid_date_str, i.check_number,
            i.customer_id, i.machine_id, i.work_summary, i.total, i.paid, i.pdf_url, i.created_at,
            c.company AS customer_company, c.contact_name AS customer_contact,
            m.machine_id AS machine_label
@@ -239,6 +249,11 @@ export async function getInvoiceById(id: number): Promise<InvoiceFull | null> {
   const r = await sql`
     SELECT i.id, i.po_number, to_char(i.invoice_date, 'YYYY-MM-DD') AS invoice_date_str,
            to_char(i.invoice_date_end, 'YYYY-MM-DD') AS invoice_date_end_str,
+           CASE WHEN i.service_dates IS NULL THEN NULL ELSE
+             (SELECT array_agg(to_char(d, 'YYYY-MM-DD') ORDER BY d)
+              FROM unnest(i.service_dates) AS d)
+           END AS service_dates_str,
+           to_char(i.paid_date, 'YYYY-MM-DD') AS paid_date_str, i.check_number,
            i.customer_id, i.machine_id, i.work_summary, i.total, i.paid, i.pdf_url, i.created_at,
            c.company AS customer_company, c.contact_name AS customer_contact,
            m.machine_id AS machine_label
@@ -264,10 +279,18 @@ export async function getMonthlyWork(months = 18): Promise<MonthlyWork[]> {
   await initSchema();
   const daysR = await sql`
     WITH d AS (
-      SELECT DISTINCT gs::date AS day
-      FROM invoices i,
-           LATERAL generate_series(i.invoice_date, COALESCE(i.invoice_date_end, i.invoice_date), interval '1 day') gs
-      WHERE i.invoice_date IS NOT NULL
+      SELECT DISTINCT day FROM (
+        -- newer invoices: the individual visit dates that were chosen
+        SELECT unnest(i.service_dates) AS day
+        FROM invoices i WHERE i.service_dates IS NOT NULL
+        UNION ALL
+        -- older invoices: every day in the start–end range
+        SELECT gs::date AS day
+        FROM invoices i,
+             LATERAL generate_series(i.invoice_date, COALESCE(i.invoice_date_end, i.invoice_date), interval '1 day') gs
+        WHERE i.service_dates IS NULL AND i.invoice_date IS NOT NULL
+      ) x
+      WHERE day IS NOT NULL
     )
     SELECT to_char(date_trunc('month', day), 'YYYY-MM') AS month, COUNT(*) AS days
     FROM d GROUP BY 1;

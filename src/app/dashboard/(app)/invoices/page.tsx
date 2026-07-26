@@ -1,7 +1,7 @@
 import { unstable_noStore as noStore } from "next/cache";
 import Link from "next/link";
 import { getInvoices } from "@/lib/queries";
-import { money, shortDate } from "@/lib/format";
+import { money, invoiceDates, shortDate } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -62,7 +62,7 @@ export default async function InvoicesPage({
             )}
             {invoices.map((inv) => (
               <tr key={inv.id} className="border-t border-slate-100 hover:bg-slate-50">
-                <td className="px-4 py-3">{shortDate(inv.invoice_date)}</td>
+                <td className="px-4 py-3">{invoiceDates(inv)}</td>
                 <td className="px-4 py-3 font-medium">
                   {inv.customer_company || "—"}
                 </td>
@@ -70,7 +70,7 @@ export default async function InvoicesPage({
                 <td className="px-4 py-3">
                   {inv.paid ? (
                     <span className="rounded-full bg-brand-green/15 px-2 py-0.5 text-xs font-semibold text-brand-green-dark">
-                      Paid
+                      {inv.paid_date ? `Paid ${shortDate(inv.paid_date)}` : "Paid"}
                     </span>
                   ) : (
                     <span className="rounded-full bg-brand-orange/15 px-2 py-0.5 text-xs font-semibold text-brand-orange-dark">

@@ -2,15 +2,9 @@ import { unstable_noStore as noStore } from "next/cache";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getInvoiceById } from "@/lib/queries";
-import { money, shortDate } from "@/lib/format";
+import { money, shortDate, invoiceDates } from "@/lib/format";
 import { MarkPaidButton } from "@/components/dashboard/MarkPaidButton";
 import { DeleteInvoiceButton } from "@/components/dashboard/DeleteInvoiceButton";
-
-function dateRange(start: string | null, end: string | null): string {
-  if (!start) return "—";
-  if (end && end !== start) return `${shortDate(start)} – ${shortDate(end)}`;
-  return shortDate(start);
-}
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -64,8 +58,14 @@ export default async function InvoiceDetailPage({
             </div>
             <p className="text-slate-500">
               {inv.customer_contact ? `${inv.customer_contact} · ` : ""}
-              {dateRange(inv.invoice_date, inv.invoice_date_end)}
+              {invoiceDates(inv)}
             </p>
+            {inv.paid && (inv.paid_date || inv.check_number) && (
+              <p className="mt-1 text-sm text-brand-green-dark">
+                Paid{inv.paid_date ? ` ${shortDate(inv.paid_date)}` : ""}
+                {inv.check_number ? ` · check #${inv.check_number}` : ""}
+              </p>
+            )}
           </div>
           <div className="text-right">
             <p className="text-sm text-slate-500">Total charge</p>
@@ -81,7 +81,12 @@ export default async function InvoiceDetailPage({
         <div className="mt-6 grid grid-cols-2 gap-4 text-sm sm:grid-cols-3">
           <Field label="PO #" value={inv.po_number} />
           <Field label="Machine" value={inv.machine_label} />
-          <Field label="Service date" value={dateRange(inv.invoice_date, inv.invoice_date_end)} />
+          <Field
+            label={inv.service_dates && inv.service_dates.length > 1 ? "Dates worked" : "Service date"}
+            value={invoiceDates(inv)}
+          />
+          {inv.paid && <Field label="Date paid" value={inv.paid_date ? shortDate(inv.paid_date) : null} />}
+          {inv.paid && <Field label="Check #" value={inv.check_number} />}
         </div>
 
         {inv.work_summary && (

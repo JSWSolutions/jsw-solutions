@@ -1,18 +1,12 @@
 import { unstable_noStore as noStore } from "next/cache";
 import Link from "next/link";
 import { getInvoices } from "@/lib/queries";
-import { money, shortDate } from "@/lib/format";
+import { money, invoiceDates } from "@/lib/format";
 import { MarkPaidButton } from "@/components/dashboard/MarkPaidButton";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const fetchCache = "force-no-store";
-
-function dateRange(start: string | null, end: string | null): string {
-  if (!start) return "—";
-  if (end && end !== start) return `${shortDate(start)} – ${shortDate(end)}`;
-  return shortDate(start);
-}
 
 export default async function UnpaidPage() {
   noStore();
@@ -51,7 +45,7 @@ export default async function UnpaidPage() {
             )}
             {invoices.map((inv) => (
               <tr key={inv.id} className="border-t border-slate-100 hover:bg-slate-50">
-                <td className="px-4 py-3">{dateRange(inv.invoice_date, inv.invoice_date_end)}</td>
+                <td className="px-4 py-3">{invoiceDates(inv)}</td>
                 <td className="px-4 py-3 font-medium">{inv.customer_company || "—"}</td>
                 <td className="px-4 py-3">{inv.machine_label || "—"}</td>
                 <td className="px-4 py-3 text-right font-semibold">{money(inv.total)}</td>

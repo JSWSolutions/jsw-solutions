@@ -4,10 +4,40 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import type { LineItem, ParsedInvoice } from "@/lib/types";
 
+const MAX_DATES = 5;
+
+/** Today's date in the browser's own timezone, as yyyy-mm-dd. */
+function todayLocal(): string {
+  const d = new Date();
+  const m = `${d.getMonth() + 1}`.padStart(2, "0");
+  const day = `${d.getDate()}`.padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+
+/**
+ * Older invoices were entered as a start–end range. If a PDF still parses that
+ * way, turn the range into the individual days it covers (up to 5) so the new
+ * form can show them as separate date boxes.
+ */
+function expandRange(start: string | null, end: string | null): string[] {
+  if (!start) return [];
+  if (!end || end === start) return [start];
+  const out: string[] = [];
+  const from = new Date(`${start}T00:00:00`);
+  const to = new Date(`${end}T00:00:00`);
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to < from) {
+    return [start];
+  }
+  for (let d = from; d <= to && out.length < MAX_DATES; d.setDate(d.getDate() + 1)) {
+    const m = `${d.getMonth() + 1}`.padStart(2, "0");
+    const day = `${d.getDate()}`.padStart(2, "0");
+    out.push(`${d.getFullYear()}-${m}-${day}`);
+  }
+  return out;
+}
+
 type FormState = {
   po_number: string;
-  invoice_date: string;
-  invoice_date_end: string;
   machine_id: string;
   customer_company: string;
   customer_contact: string;
@@ -22,8 +52,6 @@ type FormState = {
 
 const EMPTY: FormState = {
   po_number: "",
-  invoice_date: "",
-  invoice_date_end: "",
   machine_id: "",
   customer_company: "",
   customer_contact: "",
@@ -39,8 +67,6 @@ const EMPTY: FormState = {
 function parsedToForm(p: ParsedInvoice): FormState {
   return {
     po_number: p.po_number ?? "",
-    invoice_date: p.invoice_date ?? "",
-    invoice_date_end: p.invoice_date_end ?? "",
     machine_id: p.machine_id ?? "",
     customer_company: p.customer_company ?? "",
     customer_contact: p.customer_contact ?? "",
@@ -64,7 +90,10 @@ export default function NewInvoicePage() {
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY);
   const [items, setItems] = useState<LineItem[]>([]);
+  const [dates, setDates] = useState<string[]>([""]);
   const [paid, setPaid] = useState(false);
+  const [paidDate, setPaidDate] = useState(todayLocal());
+  const [checkNo, setCheckNo] = useState("");
 
   const computedTotal = useMemo(
     () => items.reduce((s, li) => s + (Number(li.line_total) || 0), 0),
@@ -74,6 +103,22 @@ export default function NewInvoicePage() {
   function set<K extends keyof FormState>(k: K, v: string) {
     setForm((f) => ({ ...f, [k]: v }));
   }
+
+  function setDate(i: number, v: string) {
+    setDates((arr) => arr.map((d, idx) => (idx === i ? v : d)));
+  }
+  function addDate() {
+    setDates((arr) => (arr.length >= MAX_DATES ? arr : [...arr, ""]));
+  }
+  function removeDate(i: number) {
+    setDates((arr) => (arr.length <= 1 ? [""] : arr.filter((_, idx) => idx !== i)));
+  }
+
+  /** The dates actually filled in, tidied up — no blanks, no repeats, in order. */
+  const chosenDates = useMemo(
+    () => Array.from(new Set(dates.map((d) => d.trim()).filter(Boolean))).sort(),
+    [dates],
+  );
 
   async function handleFile(file: File) {
     setParsing(true);
@@ -93,6 +138,10 @@ export default function NewInvoicePage() {
       }
       const parsed = json.parsed as ParsedInvoice;
       setForm(parsedToForm(parsed));
+      const found = parsed.service_dates?.length
+        ? parsed.service_dates.slice(0, MAX_DATES)
+        : expandRange(parsed.invoice_date, parsed.invoice_date_end);
+      setDates(found.length ? found : [""]);
       setItems(parsed.line_items ?? []);
       setPdfUrl(json.pdfUrl ?? null);
       setNotice(
@@ -121,13 +170,24 @@ export default function NewInvoicePage() {
   }
 
   async function save() {
+    if (chosenDates.length === 0) {
+      setError("Please pick at least one date the work was done.");
+      return;
+    }
     setSaving(true);
     setError("");
     const totalOverride = form.total.trim() ? Number(form.total) : computedTotal;
     const payload = {
-      data: { ...form, total: totalOverride, line_items: items },
+      data: {
+        ...form,
+        service_dates: chosenDates,
+        total: totalOverride,
+        line_items: items,
+      },
       pdfUrl,
       paid,
+      paid_date: paid ? paidDate : null,
+      check_number: paid ? checkNo : null,
     };
     try {
       const res = await fetch("/api/invoices", {
@@ -181,6 +241,7 @@ export default function NewInvoicePage() {
             onClick={() => {
               setForm(EMPTY);
               setItems([]);
+              setDates([todayLocal()]);
               setStep("form");
             }}
             className="text-sm font-medium text-slate-500 hover:text-brand-orange"
@@ -218,10 +279,46 @@ export default function NewInvoicePage() {
         <Grid>
           <Input label="PO #" value={form.po_number} onChange={(v) => set("po_number", v)} />
           <Input label="Machine ID" value={form.machine_id} onChange={(v) => set("machine_id", v)} />
-          <Input label="Date" type="date" value={form.invoice_date} onChange={(v) => set("invoice_date", v)} />
-          <Input label="End date (only for a multi-day job)" type="date" value={form.invoice_date_end} onChange={(v) => set("invoice_date_end", v)} />
         </Grid>
-        <label className="mt-3 flex items-center gap-2 text-sm font-medium text-slate-700">
+
+        <div className="mt-4">
+          <p className="text-sm font-medium text-slate-600">Dates worked</p>
+          <p className="mt-0.5 text-xs text-slate-500">
+            Pick each day you were on site — up to {MAX_DATES}. Travel time is split evenly
+            across them for the mileage log.
+          </p>
+          <div className="mt-2 space-y-2">
+            {dates.map((d, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <input
+                  type="date"
+                  value={d}
+                  onChange={(e) => setDate(i, e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-orange sm:w-56"
+                />
+                {dates.length > 1 && (
+                  <button
+                    onClick={() => removeDate(i)}
+                    className="px-2 text-slate-400 hover:text-red-500"
+                    title="Remove this date"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+          {dates.length < MAX_DATES && (
+            <button
+              onClick={addDate}
+              className="mt-2 rounded-lg border border-dashed border-slate-300 px-3 py-2 text-sm font-medium text-slate-600 hover:border-brand-orange hover:text-brand-orange"
+            >
+              + Add another date
+            </button>
+          )}
+        </div>
+
+        <label className="mt-4 flex items-center gap-2 text-sm font-medium text-slate-700">
           <input
             type="checkbox"
             checked={paid}
@@ -230,6 +327,19 @@ export default function NewInvoicePage() {
           />
           Already paid (leave unchecked if the customer hasn&apos;t paid yet)
         </label>
+
+        {paid && (
+          <div className="mt-3 rounded-lg bg-slate-50 p-3">
+            <Grid>
+              <Input label="Date paid" type="date" value={paidDate} onChange={setPaidDate} />
+              <Input
+                label="Check # (leave blank if not a check)"
+                value={checkNo}
+                onChange={setCheckNo}
+              />
+            </Grid>
+          </div>
+        )}
       </Section>
 
       <Section title="Customer">
