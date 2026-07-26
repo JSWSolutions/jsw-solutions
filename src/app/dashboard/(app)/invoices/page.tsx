@@ -43,7 +43,7 @@ export default async function InvoicesPage({
               <th className="px-4 py-3">Date</th>
               <th className="px-4 py-3">Customer</th>
               <th className="px-4 py-3">Machine</th>
-              <th className="px-4 py-3">PO#</th>
+              <th className="px-4 py-3">Status</th>
               <th className="px-4 py-3 text-right">Total</th>
               <th className="px-4 py-3"></th>
             </tr>
@@ -63,7 +63,17 @@ export default async function InvoicesPage({
                   {inv.customer_company || "—"}
                 </td>
                 <td className="px-4 py-3">{inv.machine_label || "—"}</td>
-                <td className="px-4 py-3 text-slate-500">{inv.po_number || "—"}</td>
+                <td className="px-4 py-3">
+                  {inv.paid ? (
+                    <span className="rounded-full bg-brand-green/15 px-2 py-0.5 text-xs font-semibold text-brand-green-dark">
+                      Paid
+                    </span>
+                  ) : (
+                    <span className="rounded-full bg-brand-orange/15 px-2 py-0.5 text-xs font-semibold text-brand-orange-dark">
+                      Unpaid
+                    </span>
+                  )}
+                </td>
                 <td className="px-4 py-3 text-right font-semibold">
                   {money(inv.total)}
                 </td>

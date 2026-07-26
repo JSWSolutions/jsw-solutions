@@ -3,6 +3,7 @@ import {
   getDashboardTotals,
   getMonthlyIncome,
   getYearlyIncome,
+  getMonthlyWork,
 } from "@/lib/queries";
 import { money, monthLabel } from "@/lib/format";
 
@@ -32,28 +33,63 @@ function Stat({
 }
 
 export default async function OverviewPage() {
-  const [totals, monthly, yearly] = await Promise.all([
+  const [totals, monthly, yearly, work] = await Promise.all([
     getDashboardTotals(),
     getMonthlyIncome(18),
     getYearlyIncome(),
+    getMonthlyWork(12),
   ]);
 
   const maxMonth = Math.max(1, ...monthly.map((m) => m.total));
+  const recentWork = [...work].reverse();
 
   return (
     <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-extrabold text-slate-900">Overview</h1>
-        <p className="text-slate-500">Company financials at a glance</p>
+        <p className="text-slate-500">Company financials at a glance (income = paid invoices)</p>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
-        <Stat label="Gross income (this month)" value={money(totals.grossThisMonth)} />
-        <Stat label="Gross income (this year)" value={money(totals.grossThisYear)} accent />
-        <Stat label="Gross income (all time)" value={money(totals.grossAllTime)} />
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <Stat label="Paid income (this month)" value={money(totals.grossThisMonth)} />
+        <Stat label="Paid income (this year)" value={money(totals.grossThisYear)} accent />
+        <Stat label="Paid income (all time)" value={money(totals.grossAllTime)} />
+        <Stat
+          label={`Outstanding (${totals.unpaidCount} unpaid)`}
+          value={money(totals.outstanding)}
+        />
         <Stat label="Invoices" value={String(totals.invoiceCount)} />
         <Stat label="Customers" value={String(totals.customerCount)} />
         <Stat label="Machines serviced" value={String(totals.machineCount)} />
+      </div>
+
+      {/* Days & hours worked per month */}
+      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <h2 className="mb-4 font-bold text-slate-900">Days &amp; hours worked</h2>
+        {recentWork.length === 0 ? (
+          <p className="text-sm text-slate-500">No work logged yet.</p>
+        ) : (
+          <table className="w-full max-w-lg text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 text-left text-slate-500">
+                <th className="py-2">Month</th>
+                <th className="py-2 text-right">Days worked</th>
+                <th className="py-2 text-right">Hours</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recentWork.map((w) => (
+                <tr key={w.month} className="border-b border-slate-100">
+                  <td className="py-2 font-semibold">{monthLabel(w.month)}</td>
+                  <td className="py-2 text-right">{w.days}</td>
+                  <td className="py-2 text-right">
+                    {w.hours.toLocaleString("en-US", { maximumFractionDigits: 1 })}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
 
       {/* Monthly income chart */}

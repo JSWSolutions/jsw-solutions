@@ -7,6 +7,7 @@ import type { LineItem, ParsedInvoice } from "@/lib/types";
 type FormState = {
   po_number: string;
   invoice_date: string;
+  invoice_date_end: string;
   machine_id: string;
   customer_company: string;
   customer_contact: string;
@@ -22,6 +23,7 @@ type FormState = {
 const EMPTY: FormState = {
   po_number: "",
   invoice_date: "",
+  invoice_date_end: "",
   machine_id: "",
   customer_company: "",
   customer_contact: "",
@@ -38,6 +40,7 @@ function parsedToForm(p: ParsedInvoice): FormState {
   return {
     po_number: p.po_number ?? "",
     invoice_date: p.invoice_date ?? "",
+    invoice_date_end: p.invoice_date_end ?? "",
     machine_id: p.machine_id ?? "",
     customer_company: p.customer_company ?? "",
     customer_contact: p.customer_contact ?? "",
@@ -61,6 +64,7 @@ export default function NewInvoicePage() {
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY);
   const [items, setItems] = useState<LineItem[]>([]);
+  const [paid, setPaid] = useState(false);
 
   const computedTotal = useMemo(
     () => items.reduce((s, li) => s + (Number(li.line_total) || 0), 0),
@@ -123,6 +127,7 @@ export default function NewInvoicePage() {
     const payload = {
       data: { ...form, total: totalOverride, line_items: items },
       pdfUrl,
+      paid,
     };
     try {
       const res = await fetch("/api/invoices", {
@@ -212,9 +217,19 @@ export default function NewInvoicePage() {
       <Section title="Invoice">
         <Grid>
           <Input label="PO #" value={form.po_number} onChange={(v) => set("po_number", v)} />
-          <Input label="Date" type="date" value={form.invoice_date} onChange={(v) => set("invoice_date", v)} />
           <Input label="Machine ID" value={form.machine_id} onChange={(v) => set("machine_id", v)} />
+          <Input label="Date" type="date" value={form.invoice_date} onChange={(v) => set("invoice_date", v)} />
+          <Input label="End date (only for a multi-day job)" type="date" value={form.invoice_date_end} onChange={(v) => set("invoice_date_end", v)} />
         </Grid>
+        <label className="mt-3 flex items-center gap-2 text-sm font-medium text-slate-700">
+          <input
+            type="checkbox"
+            checked={paid}
+            onChange={(e) => setPaid(e.target.checked)}
+            className="h-4 w-4 rounded border-slate-300"
+          />
+          Already paid (leave unchecked if the customer hasn&apos;t paid yet)
+        </label>
       </Section>
 
       <Section title="Customer">

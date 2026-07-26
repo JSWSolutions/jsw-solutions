@@ -9,6 +9,7 @@ export interface Customer {
   state: string | null;
   zip: string | null;
   phone: string | null;
+  mileage_rate: number | null; // miles per billed travel hour
   created_at: string;
 }
 
@@ -32,11 +33,13 @@ export interface LineItem {
 export interface Invoice {
   id: number;
   po_number: string | null;
-  invoice_date: string | null; // ISO yyyy-mm-dd
+  invoice_date: string | null; // ISO yyyy-mm-dd (start date)
+  invoice_date_end: string | null; // ISO yyyy-mm-dd (end date, for ranges)
   customer_id: number | null;
   machine_id: number | null;
   work_summary: string | null;
   total: number;
+  paid: boolean;
   pdf_url: string | null;
   created_at: string;
 }
@@ -52,7 +55,8 @@ export interface InvoiceFull extends Invoice {
 // The shape returned by the PDF parser / posted by the new-invoice form.
 export interface ParsedInvoice {
   po_number: string | null;
-  invoice_date: string | null; // ISO yyyy-mm-dd
+  invoice_date: string | null; // ISO yyyy-mm-dd (start)
+  invoice_date_end: string | null; // ISO yyyy-mm-dd (end, or null)
   machine_id: string | null;
   customer_company: string | null;
   customer_contact: string | null;
@@ -64,4 +68,15 @@ export interface ParsedInvoice {
   work_summary: string | null;
   line_items: LineItem[];
   total: number;
+}
+
+export interface MileageEntry {
+  id: number;
+  entry_date: string | null; // ISO yyyy-mm-dd
+  customer_name: string | null;
+  miles: number;
+  reason: string; // "SERVICE" by default
+  source: "auto" | "manual";
+  invoice_id: number | null;
+  created_at: string;
 }

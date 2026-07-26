@@ -26,6 +26,8 @@ export default function DashboardLayout({
           <nav className="flex-1 space-y-1">
             <NavLink href="/dashboard" label="Overview" exact />
             <NavLink href="/dashboard/invoices" label="Invoices" />
+            <NavLink href="/dashboard/unpaid" label="Unpaid" />
+            <NavLink href="/dashboard/mileage" label="Mileage" />
             <NavLink href="/dashboard/customers" label="Customers" />
             <NavLink href="/dashboard/machines" label="Machines" />
             <Link

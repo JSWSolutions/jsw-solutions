@@ -55,6 +55,7 @@ export async function POST(req: Request) {
   const data: ParsedInvoice = {
     po_number: (d.po_number as string) || null,
     invoice_date: (d.invoice_date as string) || null,
+    invoice_date_end: (d.invoice_date_end as string) || null,
     machine_id: (d.machine_id as string) || null,
     customer_company: (d.customer_company as string) || null,
     customer_contact: (d.customer_contact as string) || null,
@@ -77,7 +78,8 @@ export async function POST(req: Request) {
 
   try {
     const pdfUrl = (body.pdfUrl as string) || null;
-    const id = await saveInvoice(data, pdfUrl);
+    const paid = body.paid === true; // new invoices default to Unpaid
+    const id = await saveInvoice(data, pdfUrl, { paid });
     return NextResponse.json({ ok: true, id });
   } catch (err) {
     console.error("Save invoice failed:", err);

@@ -2,6 +2,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getInvoiceById } from "@/lib/queries";
 import { money, shortDate } from "@/lib/format";
+import { MarkPaidButton } from "@/components/dashboard/MarkPaidButton";
+
+function dateRange(start: string | null, end: string | null): string {
+  if (!start) return "—";
+  if (end && end !== start) return `${shortDate(start)} – ${shortDate(end)}`;
+  return shortDate(start);
+}
 
 export const dynamic = "force-dynamic";
 
@@ -36,12 +43,23 @@ export default async function InvoiceDetailPage({
       <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-extrabold text-slate-900">
-              {inv.customer_company || "Unknown customer"}
-            </h1>
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl font-extrabold text-slate-900">
+                {inv.customer_company || "Unknown customer"}
+              </h1>
+              {inv.paid ? (
+                <span className="rounded-full bg-brand-green/15 px-2.5 py-0.5 text-xs font-semibold text-brand-green-dark">
+                  Paid
+                </span>
+              ) : (
+                <span className="rounded-full bg-brand-orange/15 px-2.5 py-0.5 text-xs font-semibold text-brand-orange-dark">
+                  Unpaid
+                </span>
+              )}
+            </div>
             <p className="text-slate-500">
               {inv.customer_contact ? `${inv.customer_contact} · ` : ""}
-              {shortDate(inv.invoice_date)}
+              {dateRange(inv.invoice_date, inv.invoice_date_end)}
             </p>
           </div>
           <div className="text-right">
@@ -49,13 +67,16 @@ export default async function InvoiceDetailPage({
             <p className="text-3xl font-extrabold text-brand-green-dark">
               {money(inv.total)}
             </p>
+            <div className="mt-2">
+              <MarkPaidButton id={inv.id} paid={inv.paid} size="lg" />
+            </div>
           </div>
         </div>
 
         <div className="mt-6 grid grid-cols-2 gap-4 text-sm sm:grid-cols-3">
           <Field label="PO #" value={inv.po_number} />
           <Field label="Machine" value={inv.machine_label} />
-          <Field label="Invoice date" value={shortDate(inv.invoice_date)} />
+          <Field label="Service date" value={dateRange(inv.invoice_date, inv.invoice_date_end)} />
         </div>
 
         {inv.work_summary && (

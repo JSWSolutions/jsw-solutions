@@ -196,7 +196,7 @@ export default function HomePage() {
           <p className="mt-2 text-ink/90">
             JSW Solutions LLC &nbsp;·&nbsp; Mailing Address: 1151 Bishop Rd,
             Saline MI 48176 &nbsp;·&nbsp; Email:{" "}
-            
+            <a
               className="text-brand-green-dark underline"
               href="mailto:jsawsolutions@gmail.com"
             >

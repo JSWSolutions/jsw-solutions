@@ -6,9 +6,11 @@ import type { InvoiceFull, LineItem } from "./types";
 const num = (v: unknown): number => (v == null ? 0 : Number(v));
 
 export interface DashboardTotals {
-  grossAllTime: number;
-  grossThisYear: number;
-  grossThisMonth: number;
+  grossAllTime: number; // paid only
+  grossThisYear: number; // paid only
+  grossThisMonth: number; // paid only
+  outstanding: number; // unpaid total owed
+  unpaidCount: number;
   invoiceCount: number;
   customerCount: number;
   machineCount: number;
@@ -18,9 +20,11 @@ export async function getDashboardTotals(): Promise<DashboardTotals> {
   await initSchema();
   const r = await sql`
     SELECT
-      COALESCE(SUM(total), 0) AS gross_all,
-      COALESCE(SUM(total) FILTER (WHERE date_trunc('year', invoice_date) = date_trunc('year', now())), 0) AS gross_year,
-      COALESCE(SUM(total) FILTER (WHERE date_trunc('month', invoice_date) = date_trunc('month', now())), 0) AS gross_month,
+      COALESCE(SUM(total) FILTER (WHERE paid), 0) AS gross_all,
+      COALESCE(SUM(total) FILTER (WHERE paid AND date_trunc('year', invoice_date) = date_trunc('year', now())), 0) AS gross_year,
+      COALESCE(SUM(total) FILTER (WHERE paid AND date_trunc('month', invoice_date) = date_trunc('month', now())), 0) AS gross_month,
+      COALESCE(SUM(total) FILTER (WHERE NOT paid), 0) AS outstanding,
+      COUNT(*) FILTER (WHERE NOT paid) AS unpaid_count,
       COUNT(*) AS invoice_count
     FROM invoices;
   `;
@@ -31,6 +35,8 @@ export async function getDashboardTotals(): Promise<DashboardTotals> {
     grossAllTime: num(row.gross_all),
     grossThisYear: num(row.gross_year),
     grossThisMonth: num(row.gross_month),
+    outstanding: num(row.outstanding),
+    unpaidCount: num(row.unpaid_count),
     invoiceCount: num(row.invoice_count),
     customerCount: num(c.rows[0].n),
     machineCount: num(m.rows[0].n),
@@ -48,7 +54,7 @@ export async function getMonthlyIncome(months = 24): Promise<MonthlyPoint[]> {
     SELECT to_char(date_trunc('month', invoice_date), 'YYYY-MM') AS month,
            SUM(total) AS total
     FROM invoices
-    WHERE invoice_date IS NOT NULL
+    WHERE invoice_date IS NOT NULL AND paid
     GROUP BY 1
     ORDER BY 1;
   `;
@@ -68,7 +74,7 @@ export async function getYearlyIncome(): Promise<YearlyPoint[]> {
   await initSchema();
   const r = await sql`
     SELECT to_char(date_trunc('year', invoice_date), 'YYYY') AS year,
-           SUM(total) AS total, COUNT(*) AS count
+           SUM(total) FILTER (WHERE paid) AS total, COUNT(*) AS count
     FROM invoices
     WHERE invoice_date IS NOT NULL
     GROUP BY 1
@@ -175,10 +181,12 @@ function mapInvoiceRow(row: Record<string, unknown>): Omit<InvoiceFull, "line_it
     id: num(row.id),
     po_number: (row.po_number as string) ?? null,
     invoice_date: (row.invoice_date_str as string) ?? null,
+    invoice_date_end: (row.invoice_date_end_str as string) ?? null,
     customer_id: row.customer_id == null ? null : num(row.customer_id),
     machine_id: row.machine_id == null ? null : num(row.machine_id),
     work_summary: (row.work_summary as string) ?? null,
     total: num(row.total),
+    paid: Boolean(row.paid),
     pdf_url: (row.pdf_url as string) ?? null,
     created_at: String(row.created_at),
     customer_company: (row.customer_company as string) ?? null,
@@ -191,6 +199,7 @@ export interface InvoiceFilters {
   search?: string;
   customerId?: number;
   machineId?: number;
+  paid?: boolean; // filter by paid status
   limit?: number;
 }
 
@@ -199,9 +208,11 @@ export async function getInvoices(f: InvoiceFilters = {}): Promise<InvoiceFull[]
   const search = f.search?.trim() ?? "";
   const like = `%${search}%`;
   const limit = f.limit ?? 500;
+  const paidFilter = f.paid === undefined ? null : f.paid;
   const r = await sql`
     SELECT i.id, i.po_number, to_char(i.invoice_date, 'YYYY-MM-DD') AS invoice_date_str,
-           i.customer_id, i.machine_id, i.work_summary, i.total, i.pdf_url, i.created_at,
+           to_char(i.invoice_date_end, 'YYYY-MM-DD') AS invoice_date_end_str,
+           i.customer_id, i.machine_id, i.work_summary, i.total, i.paid, i.pdf_url, i.created_at,
            c.company AS customer_company, c.contact_name AS customer_contact,
            m.machine_id AS machine_label
     FROM invoices i
@@ -211,6 +222,7 @@ export async function getInvoices(f: InvoiceFilters = {}): Promise<InvoiceFull[]
            OR i.po_number ILIKE ${like} OR i.work_summary ILIKE ${like})
       AND (${f.customerId ?? null}::int IS NULL OR i.customer_id = ${f.customerId ?? null})
       AND (${f.machineId ?? null}::int IS NULL OR i.machine_id = ${f.machineId ?? null})
+      AND (${paidFilter}::boolean IS NULL OR i.paid = ${paidFilter})
     ORDER BY i.invoice_date DESC NULLS LAST, i.id DESC
     LIMIT ${limit};
   `;
@@ -226,7 +238,8 @@ export async function getInvoiceById(id: number): Promise<InvoiceFull | null> {
   await initSchema();
   const r = await sql`
     SELECT i.id, i.po_number, to_char(i.invoice_date, 'YYYY-MM-DD') AS invoice_date_str,
-           i.customer_id, i.machine_id, i.work_summary, i.total, i.pdf_url, i.created_at,
+           to_char(i.invoice_date_end, 'YYYY-MM-DD') AS invoice_date_end_str,
+           i.customer_id, i.machine_id, i.work_summary, i.total, i.paid, i.pdf_url, i.created_at,
            c.company AS customer_company, c.contact_name AS customer_contact,
            m.machine_id AS machine_label
     FROM invoices i
@@ -237,4 +250,130 @@ export async function getInvoiceById(id: number): Promise<InvoiceFull | null> {
   if (r.rows.length === 0) return null;
   const base = mapInvoiceRow(r.rows[0]);
   return { ...base, line_items: await attachLineItems(base.id) };
+}
+
+// ---- days & hours worked per month ---------------------------------------
+
+export interface MonthlyWork {
+  month: string; // yyyy-mm
+  days: number; // distinct calendar days worked (ranges expanded)
+  hours: number; // sum of all labor line hours
+}
+
+export async function getMonthlyWork(months = 18): Promise<MonthlyWork[]> {
+  await initSchema();
+  const daysR = await sql`
+    WITH d AS (
+      SELECT DISTINCT gs::date AS day
+      FROM invoices i,
+           LATERAL generate_series(i.invoice_date, COALESCE(i.invoice_date_end, i.invoice_date), interval '1 day') gs
+      WHERE i.invoice_date IS NOT NULL
+    )
+    SELECT to_char(date_trunc('month', day), 'YYYY-MM') AS month, COUNT(*) AS days
+    FROM d GROUP BY 1;
+  `;
+  const hoursR = await sql`
+    SELECT to_char(date_trunc('month', i.invoice_date), 'YYYY-MM') AS month,
+           COALESCE(SUM(li.qty), 0) AS hours
+    FROM invoices i JOIN line_items li ON li.invoice_id = i.id
+    WHERE i.invoice_date IS NOT NULL
+    GROUP BY 1;
+  `;
+  const byMonth: Record<string, MonthlyWork> = {};
+  for (const row of daysR.rows) {
+    const m = row.month as string;
+    byMonth[m] = byMonth[m] || { month: m, days: 0, hours: 0 };
+    byMonth[m].days = num(row.days);
+  }
+  for (const row of hoursR.rows) {
+    const m = row.month as string;
+    byMonth[m] = byMonth[m] || { month: m, days: 0, hours: 0 };
+    byMonth[m].hours = num(row.hours);
+  }
+  return Object.values(byMonth)
+    .sort((a, b) => a.month.localeCompare(b.month))
+    .slice(-months);
+}
+
+// ---- mileage --------------------------------------------------------------
+
+export interface MileageRow {
+  id: number;
+  entry_date: string | null;
+  customer_name: string | null;
+  miles: number;
+  reason: string;
+  source: string;
+}
+
+export async function getMileageLog(search = ""): Promise<MileageRow[]> {
+  await initSchema();
+  const like = `%${search.trim()}%`;
+  const r = await sql`
+    SELECT id, to_char(entry_date, 'YYYY-MM-DD') AS entry_date, customer_name, miles, reason, source
+    FROM mileage
+    WHERE (${search} = '' OR customer_name ILIKE ${like} OR reason ILIKE ${like})
+    ORDER BY entry_date DESC NULLS LAST, id DESC
+    LIMIT 2000;
+  `;
+  return r.rows.map((row) => ({
+    id: num(row.id),
+    entry_date: (row.entry_date as string) ?? null,
+    customer_name: (row.customer_name as string) ?? null,
+    miles: num(row.miles),
+    reason: (row.reason as string) ?? "SERVICE",
+    source: (row.source as string) ?? "manual",
+  }));
+}
+
+export interface MileageTotals {
+  allTime: number;
+  thisYear: number;
+  thisMonth: number;
+  entryCount: number;
+}
+
+export async function getMileageTotals(): Promise<MileageTotals> {
+  await initSchema();
+  const r = await sql`
+    SELECT
+      COALESCE(SUM(miles), 0) AS all_time,
+      COALESCE(SUM(miles) FILTER (WHERE date_trunc('year', entry_date) = date_trunc('year', now())), 0) AS this_year,
+      COALESCE(SUM(miles) FILTER (WHERE date_trunc('month', entry_date) = date_trunc('month', now())), 0) AS this_month,
+      COUNT(*) AS entry_count
+    FROM mileage;
+  `;
+  const row = r.rows[0];
+  return {
+    allTime: num(row.all_time),
+    thisYear: num(row.this_year),
+    thisMonth: num(row.this_month),
+    entryCount: num(row.entry_count),
+  };
+}
+
+export interface CustomerRate {
+  company: string;
+  mileage_rate: number | null; // miles per billed travel hour
+}
+
+export async function getCustomerRates(): Promise<CustomerRate[]> {
+  await initSchema();
+  const r = await sql`
+    SELECT company, mileage_rate FROM customers ORDER BY company ASC;
+  `;
+  return r.rows.map((row) => ({
+    company: row.company as string,
+    mileage_rate: row.mileage_rate == null ? null : num(row.mileage_rate),
+  }));
+}
+
+export async function getMileageByYear(): Promise<{ year: string; miles: number }[]> {
+  await initSchema();
+  const r = await sql`
+    SELECT to_char(date_trunc('year', entry_date), 'YYYY') AS year, SUM(miles) AS miles
+    FROM mileage WHERE entry_date IS NOT NULL
+    GROUP BY 1 ORDER BY 1 DESC;
+  `;
+  return r.rows.map((row) => ({ year: row.year as string, miles: num(row.miles) }));
 }

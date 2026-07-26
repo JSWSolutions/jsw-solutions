@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { AUTH_COOKIE, verifySessionToken } from "@/lib/auth";
 
 // Routes that require a valid dashboard session.
-const PROTECTED_API = ["/api/invoices", "/api/parse"];
+const PROTECTED_API = ["/api/invoices", "/api/parse", "/api/mileage", "/api/mileage-rate"];
 
 export const config = {
   // Run on everything except Next internals and static files.

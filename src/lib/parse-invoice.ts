@@ -62,8 +62,36 @@ function toIsoDate(raw: string | null): string | null {
   return `${year}-${month}-${day}`;
 }
 
+/**
+ * Parses a date field that may be a single date or a range, e.g.
+ * "6/30/2026", "8/16/2026 - 8/18/2026", "8/16 - 8/18/2026".
+ * Returns ISO start and end (end is null for a single date).
+ */
+function parseDateRange(field: string | null): { start: string | null; end: string | null } {
+  if (!field) return { start: null, end: null };
+  const norm = field.replace(/[‒-―]/g, "-").replace(/\s+to\s+/i, " - ");
+  // Two slash-dates separated by a dash → a range.
+  const two = /(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)\s*-\s*(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)/.exec(norm);
+  if (two) {
+    let a = two[1];
+    const b = two[2];
+    const yb = (b.match(/\/(\d{2,4})$/) || [])[1];
+    // If the start date has no year, borrow it from the end date.
+    if (yb && a.split("/").length === 2) a = `${a}/${yb}`;
+    return { start: toIsoDate(a), end: toIsoDate(b) };
+  }
+  const one = /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/.exec(norm);
+  if (one) return { start: toIsoDate(one[1]), end: null };
+  return { start: null, end: null };
+}
+
 // ---- the parser -----------------------------------------------------------
 
+/**
+ * Parses text extracted from the JSW Solutions service-invoice template.
+ * Every field is best-effort; the dashboard always shows the result in an
+ * editable form so a human can correct anything before saving.
+ */
 export function parseInvoiceText(rawText: string): ParsedInvoice {
   const text = clean(rawText);
 
@@ -75,13 +103,16 @@ export function parseInvoiceText(rawText: string): ParsedInvoice {
   let machine = firstMatch(header, /Machine\s*:?[ \t]*([A-Za-z0-9][A-Za-z0-9#()\-\/ ]*)/i);
   if (machine) {
     machine = machine.replace(/\s+/g, " ").trim();
+    // drop a trailing label that bled in from the same line (e.g. "... Date")
     machine = machine.replace(/\s+(Date|PO|Number|Website|Company)\b.*$/i, "").trim();
     if (machine.length > 30 || machine.length < 2 || /^(PO|Date|Company|Website|Number|Address)\b/i.test(machine)) {
       machine = null;
     }
   }
-  const dateRaw = firstMatch(header, /Date\s*:?[ \t]*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i);
+  const dateField = firstMatch(header, /Date\s*:?[ \t]*([^\n]+)/i);
+  const dateRange = parseDateRange(dateField);
 
+  // "PREPARED FOR" holds the customer contact + company.
   const prepared = section(
     text,
     /PREPARED\s+FOR/i,
@@ -96,6 +127,7 @@ export function parseInvoiceText(rawText: string): ParsedInvoice {
     /Customer\s+Company\s*:?\s*(.+?)(?:\s+Customer\s+(?:Name|Address)|$)/im,
   );
 
+  // "PROJECT/WORK LOCATION" holds the customer's site address + phone.
   const location = section(
     text,
     /PROJECT\s*\/?\s*WORK\s+LOCATION/i,
@@ -113,13 +145,16 @@ export function parseInvoiceText(rawText: string): ParsedInvoice {
   const zip = cityStateZip ? cityStateZip[3].trim() : null;
   const phone = firstMatch(location, /Customer\s+Phone\s*:?\s*([0-9()\-.\s]{7,})/i);
 
+  // Work summary: between NOTES/SUMMARY and the LABOR table.
   let summary = section(
     text,
     /(?:SUMMARY\s+OF\s+WORK\s+PERFORMED|NOTES)/i,
     [/\bNOTES\b/i, /PARTS\s+INCLUDED/i, /LABOR\s+INCLUDED/i, /Description\s+Cost/i],
   );
+  // Drop a leading "SUMMARY OF WORK PERFORMED" heading if NOTES matched first.
   summary = summary.replace(/^SUMMARY\s+OF\s+WORK\s+PERFORMED\s*/i, "").trim();
 
+  // Line items in the LABOR INCLUDED table.
   const labor = section(
     text,
     /LABOR\s+INCLUDED/i,
@@ -135,7 +170,8 @@ export function parseInvoiceText(rawText: string): ParsedInvoice {
 
   return {
     po_number: po,
-    invoice_date: toIsoDate(dateRaw),
+    invoice_date: dateRange.start,
+    invoice_date_end: dateRange.end,
     machine_id: machine || null,
     customer_company: company,
     customer_contact: contact,
@@ -150,6 +186,13 @@ export function parseInvoiceText(rawText: string): ParsedInvoice {
   };
 }
 
+/**
+ * Parses rows like:  SERVICE  $155.00  3.5  $542.50
+ *
+ * PDF text extractors differ: some preserve one line per row, others flatten
+ * the whole table onto a single line. We try line-by-line first (most precise)
+ * and fall back to a flattened scan if that finds nothing.
+ */
 function parseLineItems(labor: string): LineItem[] {
   if (!labor) return [];
   const byLine = parseLineItemsByLine(labor);
@@ -171,6 +214,7 @@ function parseLineItemsByLine(labor: string): LineItem[] {
     }
     if (/total\s+charge/i.test(line)) continue;
 
+    // description  rate  qty  total
     const full =
       /^([A-Za-z][A-Za-z &\/]+?)\s+\$?\s*([0-9,]+\.?\d*)\s+([0-9]+\.?\d*)\s+\$?\s*([0-9,]+\.?\d*)$/.exec(
         line,
@@ -186,6 +230,7 @@ function parseLineItemsByLine(labor: string): LineItem[] {
       continue;
     }
 
+    // description  total  (parts / flat charges without a rate & qty)
     const simple = /^([A-Za-z][A-Za-z &\/]+?)\s+\$?\s*([0-9,]+\.\d{2})$/.exec(line);
     if (simple) {
       items.push({
@@ -203,6 +248,7 @@ function parseLineItemsByLine(labor: string): LineItem[] {
 function parseLineItemsFlattened(labor: string): LineItem[] {
   const items: LineItem[] = [];
   const flat = labor.replace(/\s+/g, " ").trim();
+  // Single-word uppercase description, $-anchored rate and total, numeric qty.
   const re = /([A-Z][A-Za-z]{2,20})\s+\$\s*([0-9,]+\.?\d*)\s+([0-9]+\.?\d*)\s+\$\s*([0-9,]+\.?\d*)/g;
   let m: RegExpExecArray | null;
   let order = 0;
