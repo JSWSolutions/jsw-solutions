@@ -187,6 +187,7 @@ function mapInvoiceRow(row: Record<string, unknown>): Omit<InvoiceFull, "line_it
       : null,
     paid_date: (row.paid_date_str as string) ?? null,
     check_number: (row.check_number as string) ?? null,
+    payment_method: (row.payment_method as string) ?? null,
     customer_id: row.customer_id == null ? null : num(row.customer_id),
     machine_id: row.machine_id == null ? null : num(row.machine_id),
     work_summary: (row.work_summary as string) ?? null,
@@ -221,7 +222,7 @@ export async function getInvoices(f: InvoiceFilters = {}): Promise<InvoiceFull[]
              (SELECT array_agg(to_char(d, 'YYYY-MM-DD') ORDER BY d)
               FROM unnest(i.service_dates) AS d)
            END AS service_dates_str,
-           to_char(i.paid_date, 'YYYY-MM-DD') AS paid_date_str, i.check_number,
+           to_char(i.paid_date, 'YYYY-MM-DD') AS paid_date_str, i.check_number, i.payment_method,
            i.customer_id, i.machine_id, i.work_summary, i.total, i.paid, i.pdf_url, i.created_at,
            c.company AS customer_company, c.contact_name AS customer_contact,
            m.machine_id AS machine_label
@@ -253,7 +254,7 @@ export async function getInvoiceById(id: number): Promise<InvoiceFull | null> {
              (SELECT array_agg(to_char(d, 'YYYY-MM-DD') ORDER BY d)
               FROM unnest(i.service_dates) AS d)
            END AS service_dates_str,
-           to_char(i.paid_date, 'YYYY-MM-DD') AS paid_date_str, i.check_number,
+           to_char(i.paid_date, 'YYYY-MM-DD') AS paid_date_str, i.check_number, i.payment_method,
            i.customer_id, i.machine_id, i.work_summary, i.total, i.paid, i.pdf_url, i.created_at,
            c.company AS customer_company, c.contact_name AS customer_contact,
            m.machine_id AS machine_label

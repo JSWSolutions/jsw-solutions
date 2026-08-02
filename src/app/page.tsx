@@ -66,6 +66,12 @@ function NavBar() {
           <a href="#about" className="hover:text-brand-orange">About us</a>
           <a href="#why" className="hover:text-brand-orange">Why us?</a>
           <a href="#team" className="hover:text-brand-orange">Service team</a>
+          <Link
+            href="/pay"
+            className="rounded-lg bg-brand-orange px-4 py-2 text-white hover:bg-brand-orange-dark"
+          >
+            Pay an Invoice
+          </Link>
         </nav>
       </div>
     </header>
@@ -204,6 +210,12 @@ export default function HomePage() {
             </a>
           </p>
           <p className="mt-1 text-ink/70">Phone: 734-320-6348</p>
+          <Link
+            href="/pay"
+            className="mt-4 inline-block rounded-lg bg-brand-orange px-5 py-2.5 font-semibold text-white hover:bg-brand-orange-dark"
+          >
+            Pay an Invoice
+          </Link>
         </div>
       </footer>
     </div>

@@ -73,6 +73,12 @@ export async function initSchema() {
   // Payment details, filled in when an invoice is marked paid.
   await sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS paid_date DATE;`;
   await sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS check_number TEXT;`;
+  // Set when a customer pays through the public /pay page via Stripe. NULL
+  // means it was marked paid by hand (a check, cash, or otherwise).
+  await sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS payment_method TEXT;`;
+  // The Stripe Checkout session that paid this invoice, if any — lets the
+  // webhook safely replay without double-processing.
+  await sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS stripe_session_id TEXT;`;
   // Up to 5 individual visit dates. NULL on older invoices, which keep using
   // invoice_date / invoice_date_end as a range.
   await sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS service_dates DATE[];`;
@@ -201,24 +207,105 @@ export async function setCustomerRate(company: string, rate: number | null): Pro
 export async function setInvoicePaid(
   id: number,
   paid: boolean,
-  details: { paid_date?: string | null; check_number?: string | null } = {},
+  details: {
+    paid_date?: string | null;
+    check_number?: string | null;
+    payment_method?: string | null;
+  } = {},
 ): Promise<void> {
   await initSchema();
   if (!paid) {
     await sql`
-      UPDATE invoices SET paid = false, paid_date = NULL, check_number = NULL
+      UPDATE invoices SET paid = false, paid_date = NULL, check_number = NULL,
+             payment_method = NULL, stripe_session_id = NULL
       WHERE id = ${id};
     `;
     return;
   }
   const when = details.paid_date?.trim() ? details.paid_date.trim() : null;
   const check = details.check_number?.trim() ? details.check_number.trim() : null;
+  const method = details.payment_method?.trim() ? details.payment_method.trim() : null;
   await sql`
     UPDATE invoices
        SET paid = true,
            paid_date = COALESCE(${when}::date, CURRENT_DATE),
-           check_number = ${check}
+           check_number = ${check},
+           payment_method = ${method}
      WHERE id = ${id};
+  `;
+}
+
+/**
+ * Finds unpaid invoices matching a PO number and the customer's ZIP on file.
+ * Used by the public "Pay my invoice" page — the ZIP acts as a second factor
+ * so a stranger can't browse PO numbers to see who owes what. Returns every
+ * match (there can be more than one if the same PO covers multiple invoices).
+ */
+export async function findPayableInvoices(
+  poNumber: string,
+  zip: string,
+): Promise<
+  {
+    id: number;
+    po_number: string | null;
+    company: string;
+    total: number;
+    invoice_date: string | null;
+  }[]
+> {
+  await initSchema();
+  const po = poNumber.trim();
+  const z = zip.trim();
+  if (!po || !z) return [];
+  const r = await sql`
+    SELECT i.id, i.po_number, c.company, i.total,
+           to_char(i.invoice_date, 'YYYY-MM-DD') AS invoice_date_str
+    FROM invoices i
+    JOIN customers c ON c.id = i.customer_id
+    WHERE i.paid = false
+      AND lower(trim(i.po_number)) = lower(trim(${po}))
+      AND c.zip IS NOT NULL
+      AND lower(trim(c.zip)) = lower(trim(${z}))
+    ORDER BY i.invoice_date DESC NULLS LAST, i.id DESC;
+  `;
+  return r.rows.map((row) => ({
+    id: Number(row.id),
+    po_number: (row.po_number as string) ?? null,
+    company: row.company as string,
+    total: Number(row.total),
+    invoice_date: (row.invoice_date_str as string) ?? null,
+  }));
+}
+
+/**
+ * Re-validates a specific invoice against PO + ZIP right before creating a
+ * Stripe session, so a tampered invoice id can't be used to pay someone
+ * else's bill (or the wrong amount).
+ */
+export async function getPayableInvoice(invoiceId: number, poNumber: string, zip: string) {
+  const rows = await findPayableInvoices(poNumber, zip);
+  return rows.find((r) => r.id === invoiceId) ?? null;
+}
+
+/**
+ * Marks an invoice paid from a completed Stripe Checkout session. Idempotent:
+ * replaying the same session id (Stripe retries webhooks) is a no-op the
+ * second time, and it never overwrites a payment already recorded under a
+ * different session.
+ */
+export async function markInvoicePaidFromStripe(
+  invoiceId: number,
+  sessionId: string,
+): Promise<void> {
+  await initSchema();
+  await sql`
+    UPDATE invoices
+       SET paid = true,
+           paid_date = COALESCE(paid_date, CURRENT_DATE),
+           payment_method = 'card',
+           stripe_session_id = ${sessionId}
+     WHERE id = ${invoiceId}
+       AND (stripe_session_id IS NULL OR stripe_session_id = ${sessionId});
   `;
 }
 

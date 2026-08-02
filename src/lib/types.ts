@@ -43,6 +43,7 @@ export interface Invoice {
   paid: boolean;
   paid_date: string | null; // ISO yyyy-mm-dd, set when marked paid
   check_number: string | null; // customer's check number, if they paid by check
+  payment_method: string | null; // "card" when paid through the public /pay page via Stripe; null otherwise
   pdf_url: string | null;
   created_at: string;
 }

@@ -60,10 +60,14 @@ export default async function InvoiceDetailPage({
               {inv.customer_contact ? `${inv.customer_contact} · ` : ""}
               {invoiceDates(inv)}
             </p>
-            {inv.paid && (inv.paid_date || inv.check_number) && (
+            {inv.paid && (inv.paid_date || inv.check_number || inv.payment_method) && (
               <p className="mt-1 text-sm text-brand-green-dark">
                 Paid{inv.paid_date ? ` ${shortDate(inv.paid_date)}` : ""}
-                {inv.check_number ? ` · check #${inv.check_number}` : ""}
+                {inv.payment_method === "card"
+                  ? " · paid by card"
+                  : inv.check_number
+                    ? ` · check #${inv.check_number}`
+                    : ""}
               </p>
             )}
           </div>
@@ -86,7 +90,11 @@ export default async function InvoiceDetailPage({
             value={invoiceDates(inv)}
           />
           {inv.paid && <Field label="Date paid" value={inv.paid_date ? shortDate(inv.paid_date) : null} />}
-          {inv.paid && <Field label="Check #" value={inv.check_number} />}
+          {inv.paid && inv.payment_method === "card" ? (
+            <Field label="Paid via" value="Credit card" />
+          ) : (
+            inv.paid && <Field label="Check #" value={inv.check_number} />
+          )}
         </div>
 
         {inv.work_summary && (
