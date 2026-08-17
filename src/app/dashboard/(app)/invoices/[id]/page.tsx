@@ -29,17 +29,17 @@ export default async function InvoiceDetailPage({
         </Link>
         <div className="flex flex-wrap gap-2">
           <a
-            href={`/api/invoices/${inv.id}/pdf`}
+            href={`/api/invoices/${inv.id}/pdf${inv.paid ? "?form=paid" : ""}`}
             className="rounded-lg bg-brand-green px-4 py-2 text-sm font-semibold text-white hover:bg-brand-green-dark"
           >
-            {inv.paid ? "Download PDF (paid)" : "Download PDF"}
+            {inv.paid ? "Download PDF — PAID version" : "Download PDF"}
           </a>
           {inv.paid && (
             <a
               href={`/api/invoices/${inv.id}/pdf?form=unpaid`}
               className="rounded-lg border border-brand-green px-4 py-2 text-sm font-semibold text-brand-green-dark hover:bg-brand-green/10"
             >
-              Download unpaid form
+              Download PDF — unpaid version
             </a>
           )}
           {inv.pdf_url && (

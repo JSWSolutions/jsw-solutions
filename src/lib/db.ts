@@ -101,8 +101,14 @@ export async function initSchema() {
 }
 
 /**
- * Recomputes the auto mileage for one customer + date: miles = (sum of that
- * day's billed TRAVEL hours across all machines) × the customer's per-hour rate.
+ * Recomputes the auto mileage for one customer + date.
+ *
+ * Every line type has its own unit — SERVICE/TRAVEL are hours, PER DIEM is
+ * days, and MILES is actual miles. So when an invoice carries a MILES line,
+ * its quantity IS the day's mileage and we use it directly. Only invoices
+ * without a MILES quantity fall back to the old estimate of billed TRAVEL
+ * hours × the customer's per-hour mileage rate.
+ *
  * One entry per customer per date. Independent of paid status.
  */
 export async function recomputeAutoMileage(
@@ -112,20 +118,31 @@ export async function recomputeAutoMileage(
   const c = await sql`
     SELECT id, mileage_rate FROM customers WHERE lower(company) = lower(${company}) LIMIT 1;
   `;
-  const rate = c.rows[0]?.mileage_rate;
-  if (rate == null) return; // no rate configured yet
+  if (c.rows.length === 0) return;
   const custId = c.rows[0].id as number;
+  // Without a rate the travel-hours fallback contributes nothing, but a real
+  // MILES quantity still gets logged — miles are miles.
+  const rate = c.rows[0].mileage_rate == null ? 0 : Number(c.rows[0].mileage_rate);
 
-  // An invoice can cover several separate visit dates. Its billed TRAVEL hours
-  // are shared evenly across those dates, so each day gets its own trip and the
-  // total miles still equal (all travel hours × rate).
+  // An invoice can cover several separate visit dates. Its miles are shared
+  // evenly across those dates, so each day gets its own trip and the total
+  // still adds up to the whole invoice's mileage.
   //
-  // A TRAVEL line only counts when it was really billed: it needs both hours and
-  // money on it. A zero-dollar or zero-hour travel line logs no miles.
+  // A TRAVEL line only counts when it was really billed (hours and money on
+  // it). A MILES line counts whenever it has a quantity — driven miles belong
+  // in the log even when they weren't charged for.
   const tr = await sql`
-    SELECT COALESCE(SUM(t.travel / t.ndates), 0) AS travel
+    SELECT COALESCE(SUM(
+             CASE WHEN t.miles_qty > 0 THEN t.miles_qty
+                  ELSE t.travel * ${rate}
+             END / t.ndates
+           ), 0) AS miles
     FROM (
       SELECT i.id,
+             COALESCE(SUM(li.qty) FILTER (
+               WHERE upper(li.description) = 'MILES'
+                 AND COALESCE(li.qty, 0) > 0
+             ), 0) AS miles_qty,
              COALESCE(SUM(li.qty) FILTER (
                WHERE upper(li.description) = 'TRAVEL'
                  AND COALESCE(li.qty, 0) > 0
@@ -141,8 +158,7 @@ export async function recomputeAutoMileage(
       GROUP BY i.id
     ) t;
   `;
-  const travel = Number(tr.rows[0].travel) || 0;
-  const miles = Math.round(travel * Number(rate) * 10) / 10;
+  const miles = Math.round((Number(tr.rows[0].miles) || 0) * 10) / 10;
   if (miles <= 0) {
     // No travel billed that day anymore (e.g. the invoice was deleted) — remove
     // any auto row we previously created so the mileage log stays accurate.
@@ -162,7 +178,7 @@ export async function recomputeAutoMileage(
         (i.service_dates IS NOT NULL AND ${date}::date = ANY (i.service_dates))
         OR (i.service_dates IS NULL AND i.invoice_date = ${date}::date)
       )
-      AND upper(li.description) NOT IN ('TRAVEL', 'PARTS')
+      AND upper(li.description) NOT IN ('TRAVEL', 'PARTS', 'MILES', 'PER DIEM')
     LIMIT 1;
   `;
   const reason = (rr.rows[0]?.d as string) || "SERVICE";
@@ -173,6 +189,26 @@ export async function recomputeAutoMileage(
     ON CONFLICT (customer_name, entry_date) WHERE source = 'auto'
       DO UPDATE SET miles = EXCLUDED.miles, reason = EXCLUDED.reason;
   `;
+}
+
+/**
+ * Rebuilds the ENTIRE auto mileage log from the invoices — every customer,
+ * every service date. Manual entries are never touched. Used by the
+ * "Recalculate from invoices" button after the mileage rules change.
+ */
+export async function recomputeAllAutoMileage(): Promise<number> {
+  await initSchema();
+  const pairs = await sql`
+    SELECT DISTINCT c.company, to_char(d, 'YYYY-MM-DD') AS d
+    FROM invoices i
+    JOIN customers c ON c.id = i.customer_id,
+         LATERAL unnest(COALESCE(i.service_dates, ARRAY[i.invoice_date])) AS d
+    WHERE d IS NOT NULL;
+  `;
+  for (const row of pairs.rows) {
+    await recomputeAutoMileage(row.company as string, row.d as string);
+  }
+  return pairs.rows.length;
 }
 
 /** Sets a customer's per-hour mileage rate and backfills their auto mileage.

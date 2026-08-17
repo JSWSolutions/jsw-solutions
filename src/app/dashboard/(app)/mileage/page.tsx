@@ -3,6 +3,7 @@ import { getMileageLog, getMileageTotals, getMileageByYear, getCustomerRates } f
 import { shortDate } from "@/lib/format";
 import { ManualMileageForm } from "@/components/dashboard/ManualMileageForm";
 import { RateEditor } from "@/components/dashboard/RateEditor";
+import { RecalcMileageButton } from "@/components/dashboard/RecalcMileageButton";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -31,11 +32,15 @@ export default async function MileagePage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-extrabold text-slate-900">Mileage Log</h1>
-        <p className="text-slate-500">
-          Auto-logged one trip per customer per service day, plus any manual entries.
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-extrabold text-slate-900">Mileage Log</h1>
+          <p className="text-slate-500">
+            Auto-logged one trip per customer per service day — a MILES line&apos;s
+            quantity when the invoice has one, travel hours × rate otherwise.
+          </p>
+        </div>
+        <RecalcMileageButton />
       </div>
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">

@@ -64,24 +64,28 @@ function workedDayCount(serviceDates: string[], start: string | null, end: strin
  * again (like 5.75 hours being saved as 575). Returns an error message, or
  * null when the line items look sane.
  */
+// Each line type has its own quantity unit. Only SERVICE and TRAVEL are hours;
+// MILES is miles (routinely way over 24!), PER DIEM is days, PARTS is pieces.
+const HOUR_LINES = new Set(["SERVICE", "TRAVEL"]);
+
 function lineItemProblem(lineItems: LineItem[], days: number): string | null {
   const maxHours = 24 * days;
   for (const li of lineItems) {
     if ((li.qty ?? 0) < 0 || (li.cost_per_hour ?? 0) < 0 || li.line_total < 0) {
       return `The "${li.description}" line has a negative number on it — please double-check it.`;
     }
-    // Qty means hours only on lines that carry an hourly rate.
-    if (li.cost_per_hour == null || li.qty == null) continue;
-    if (li.qty > maxHours) {
+    const kind = li.description.trim().toUpperCase();
+    // The physically-possible-hours cap only applies to hour lines.
+    if (HOUR_LINES.has(kind) && li.qty != null && li.qty > maxHours) {
       return (
         `The "${li.description}" line says ${li.qty} hours, but this invoice only covers ` +
         `${days} day${days === 1 ? "" : "s"} (${maxHours} hours at most). ` +
         `If you meant a decimal — 5.75, not 575 — fix the Qty and save again.`
       );
     }
-    // Rate × Qty should land near the line total. We only flag wild mismatches,
-    // so small rounding or adjustments never get in the way.
-    if (li.qty > 0 && li.cost_per_hour > 0 && li.line_total > 0) {
+    // Rate × Qty should land near the line total, whatever the unit. We only
+    // flag wild mismatches, so small rounding or adjustments never get in the way.
+    if (li.cost_per_hour != null && li.qty != null && li.qty > 0 && li.cost_per_hour > 0 && li.line_total > 0) {
       const expected = li.cost_per_hour * li.qty;
       const diff = Math.abs(expected - li.line_total);
       if (diff > Math.max(50, expected * 0.25)) {
