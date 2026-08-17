@@ -1,5 +1,5 @@
 import { unstable_noStore as noStore } from "next/cache";
-import { getMileageLog, getMileageTotals, getMileageByYear } from "@/lib/queries";
+import { getMileageLog, getMileageTotals, getMileageByYear, getMileageByMonth } from "@/lib/queries";
 import { shortDate } from "@/lib/format";
 import { ManualMileageForm } from "@/components/dashboard/ManualMileageForm";
 import { RecalcMileageButton } from "@/components/dashboard/RecalcMileageButton";
@@ -22,10 +22,11 @@ function Stat({ label, value, accent = false }: { label: string; value: string; 
 
 export default async function MileagePage() {
   noStore();
-  const [totals, log, byYear] = await Promise.all([
+  const [totals, log, byYear, byMonth] = await Promise.all([
     getMileageTotals(),
     getMileageLog(),
     getMileageByYear(),
+    getMileageByMonth(),
   ]);
 
   return (
@@ -49,19 +50,38 @@ export default async function MileagePage() {
 
       <ManualMileageForm />
 
-      {byYear.length > 0 && (
-        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="mb-3 font-bold text-slate-900">By year</h2>
-          <table className="w-full max-w-md text-sm">
-            <tbody>
-              {byYear.map((y) => (
-                <tr key={y.year} className="border-b border-slate-100">
-                  <td className="py-2 font-semibold">{y.year}</td>
-                  <td className="py-2 text-right">{miles(y.miles)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {(byMonth.length > 0 || byYear.length > 0) && (
+        <div className="grid gap-4 md:grid-cols-2">
+          {byMonth.length > 0 && (
+            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h2 className="mb-3 font-bold text-slate-900">By month</h2>
+              <table className="w-full text-sm">
+                <tbody>
+                  {byMonth.map((m) => (
+                    <tr key={m.month} className="border-b border-slate-100">
+                      <td className="py-2 font-semibold">{m.month}</td>
+                      <td className="py-2 text-right">{miles(m.miles)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {byYear.length > 0 && (
+            <div className="self-start rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h2 className="mb-3 font-bold text-slate-900">By year</h2>
+              <table className="w-full text-sm">
+                <tbody>
+                  {byYear.map((y) => (
+                    <tr key={y.year} className="border-b border-slate-100">
+                      <td className="py-2 font-semibold">{y.year}</td>
+                      <td className="py-2 text-right">{miles(y.miles)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 

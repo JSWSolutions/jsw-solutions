@@ -26,6 +26,7 @@ export interface InvoicePdfData {
   customer_zip: string | null;
   customer_phone: string | null;
   work_summary: string | null;
+  notes: string | null;
   line_items: {
     description: string;
     cost_per_hour: number | null;
@@ -262,8 +263,14 @@ export async function buildInvoicePdf(
 
   // --- NOTES -----------------------------------------------------------------
   sectionHeading("NOTES");
-  cell(MARGIN, y, CONTENT_W, 24, null);
-  y -= 24;
+  {
+    const notes = (data.notes ?? "").trim();
+    const lines = notes ? wrapText(notes, font, 8.5, CONTENT_W - 14) : [];
+    const boxH = Math.max(24, lines.length * 11 + 12);
+    cell(MARGIN, y, CONTENT_W, boxH, null);
+    lines.forEach((ln, i) => text(ln, MARGIN + 7, y - 15 - i * 11, font, 8.5, INK));
+    y -= boxH;
+  }
 
   // --- LABOR INCLUDED --------------------------------------------------------
   sectionHeading("LABOR INCLUDED");

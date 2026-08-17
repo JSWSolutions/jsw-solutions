@@ -122,6 +122,13 @@ export default async function InvoiceDetailPage({
           </div>
         )}
 
+        {inv.notes && (
+          <div className="mt-6">
+            <h2 className="mb-1 font-bold text-slate-900">Notes</h2>
+            <p className="whitespace-pre-wrap text-sm text-slate-700">{inv.notes}</p>
+          </div>
+        )}
+
         {inv.line_items.length > 0 && (
           <div className="mt-6">
             <h2 className="mb-2 font-bold text-slate-900">Line items</h2>

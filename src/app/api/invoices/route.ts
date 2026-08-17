@@ -132,6 +132,7 @@ export async function POST(req: Request) {
     customer_zip: (d.customer_zip as string) || null,
     customer_phone: (d.customer_phone as string) || null,
     work_summary: (d.work_summary as string) || null,
+    notes: (d.notes as string) || null,
     line_items: lineItems,
     total,
   };

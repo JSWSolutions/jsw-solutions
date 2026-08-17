@@ -154,6 +154,14 @@ export function parseInvoiceText(rawText: string): ParsedInvoice {
   // Drop a leading "SUMMARY OF WORK PERFORMED" heading if NOTES matched first.
   summary = summary.replace(/^SUMMARY\s+OF\s+WORK\s+PERFORMED\s*/i, "").trim();
 
+  // Notes: between the NOTES heading and the LABOR table.
+  let notes = section(
+    text,
+    /\bNOTES\b/i,
+    [/LABOR\s+INCLUDED/i, /PARTS\s+INCLUDED/i, /Description\s+Cost/i],
+  );
+  notes = notes.replace(/^NOTES\s*/i, "").trim();
+
   // Line items in the LABOR INCLUDED table.
   const labor = section(
     text,
@@ -181,6 +189,7 @@ export function parseInvoiceText(rawText: string): ParsedInvoice {
     customer_zip: zip,
     customer_phone: phone,
     work_summary: summary || null,
+    notes: notes || null,
     line_items: lineItems,
     total,
   };

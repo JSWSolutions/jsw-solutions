@@ -60,7 +60,7 @@ export default function DashboardLayout({
           <div className="mx-auto max-w-6xl p-4 md:p-8">{children}</div>
           {/* Version stamp — tells us at a glance which build is actually live. */}
           <p className="px-4 pb-4 text-center text-[10px] text-slate-300 md:px-8">
-            dashboard v2026-08-17.2
+            dashboard v2026-08-17.4
           </p>
         </main>
       </div>

@@ -74,6 +74,7 @@ type FormState = {
   customer_zip: string;
   customer_phone: string;
   work_summary: string;
+  notes: string;
   total: string;
 };
 
@@ -88,6 +89,7 @@ const EMPTY: FormState = {
   customer_zip: "",
   customer_phone: "",
   work_summary: "",
+  notes: "",
   total: "",
 };
 
@@ -144,6 +146,7 @@ function parsedToForm(p: ParsedInvoice): FormState {
     customer_zip: p.customer_zip ?? "",
     customer_phone: p.customer_phone ?? "",
     work_summary: p.work_summary ?? "",
+    notes: p.notes ?? "",
     total: p.total ? String(p.total) : "",
   };
 }
@@ -665,6 +668,16 @@ export default function NewInvoicePage() {
           rows={5}
           className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-orange"
           placeholder="Summary of work performed…"
+        />
+      </Section>
+
+      <Section title="Notes">
+        <textarea
+          value={form.notes}
+          onChange={(e) => set("notes", e.target.value)}
+          rows={3}
+          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-orange"
+          placeholder="Anything extra for the invoice's NOTES box — recommendations, parts on order, follow-ups…"
         />
       </Section>
 

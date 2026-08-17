@@ -82,6 +82,8 @@ export async function initSchema() {
   // Up to 5 individual visit dates. NULL on older invoices, which keep using
   // invoice_date / invoice_date_end as a range.
   await sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS service_dates DATE[];`;
+  // The invoice's NOTES box (separate from the work summary).
+  await sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS notes TEXT;`;
 
   await sql`
     CREATE TABLE IF NOT EXISTS mileage (
@@ -667,11 +669,11 @@ export async function saveInvoice(
 
   const invoice = await sql`
     INSERT INTO invoices (po_number, invoice_date, invoice_date_end, service_dates,
-                          customer_id, machine_id, work_summary, total, paid,
+                          customer_id, machine_id, work_summary, notes, total, paid,
                           paid_date, check_number, pdf_url)
     VALUES (${data.po_number}, ${primaryDate}, ${endDate},
             string_to_array(${datesCsv}::text, ',')::date[],
-            ${customerId}, ${machineId}, ${data.work_summary}, ${data.total}, ${paid},
+            ${customerId}, ${machineId}, ${data.work_summary}, ${data.notes ?? null}, ${data.total}, ${paid},
             CASE WHEN ${paid}::boolean THEN COALESCE(${paidDate}::date, CURRENT_DATE) END,
             CASE WHEN ${paid}::boolean THEN ${checkNumber}::text END,
             ${pdfUrl})

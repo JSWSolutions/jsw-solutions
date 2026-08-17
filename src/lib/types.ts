@@ -39,6 +39,7 @@ export interface Invoice {
   customer_id: number | null;
   machine_id: number | null;
   work_summary: string | null;
+  notes: string | null;
   total: number;
   paid: boolean;
   paid_date: string | null; // ISO yyyy-mm-dd, set when marked paid
@@ -71,6 +72,7 @@ export interface ParsedInvoice {
   customer_zip: string | null;
   customer_phone: string | null;
   work_summary: string | null;
+  notes: string | null;
   line_items: LineItem[];
   total: number;
 }

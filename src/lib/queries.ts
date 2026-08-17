@@ -191,6 +191,7 @@ function mapInvoiceRow(row: Record<string, unknown>): Omit<InvoiceFull, "line_it
     customer_id: row.customer_id == null ? null : num(row.customer_id),
     machine_id: row.machine_id == null ? null : num(row.machine_id),
     work_summary: (row.work_summary as string) ?? null,
+    notes: (row.notes as string) ?? null,
     total: num(row.total),
     paid: Boolean(row.paid),
     pdf_url: (row.pdf_url as string) ?? null,
@@ -223,7 +224,7 @@ export async function getInvoices(f: InvoiceFilters = {}): Promise<InvoiceFull[]
               FROM unnest(i.service_dates) AS d)
            END AS service_dates_str,
            to_char(i.paid_date, 'YYYY-MM-DD') AS paid_date_str, i.check_number, i.payment_method,
-           i.customer_id, i.machine_id, i.work_summary, i.total, i.paid, i.pdf_url, i.created_at,
+           i.customer_id, i.machine_id, i.work_summary, i.notes, i.total, i.paid, i.pdf_url, i.created_at,
            c.company AS customer_company, c.contact_name AS customer_contact,
            m.machine_id AS machine_label
     FROM invoices i
@@ -255,7 +256,7 @@ export async function getInvoiceById(id: number): Promise<InvoiceFull | null> {
               FROM unnest(i.service_dates) AS d)
            END AS service_dates_str,
            to_char(i.paid_date, 'YYYY-MM-DD') AS paid_date_str, i.check_number, i.payment_method,
-           i.customer_id, i.machine_id, i.work_summary, i.total, i.paid, i.pdf_url, i.created_at,
+           i.customer_id, i.machine_id, i.work_summary, i.notes, i.total, i.paid, i.pdf_url, i.created_at,
            c.company AS customer_company, c.contact_name AS customer_contact,
            m.machine_id AS machine_label
     FROM invoices i
@@ -283,7 +284,7 @@ export async function getInvoiceForPdf(id: number): Promise<InvoicePdfData | nul
              (SELECT array_agg(to_char(d, 'YYYY-MM-DD') ORDER BY d)
               FROM unnest(i.service_dates) AS d)
            END AS service_dates_str,
-           i.work_summary, i.total, i.paid,
+           i.work_summary, i.notes, i.total, i.paid,
            to_char(i.paid_date, 'YYYY-MM-DD') AS paid_date_str,
            i.check_number, i.payment_method, i.id AS invoice_id,
            c.company, c.contact_name, c.address, c.city, c.state, c.zip, c.phone,
@@ -312,6 +313,7 @@ export async function getInvoiceForPdf(id: number): Promise<InvoicePdfData | nul
     customer_zip: (row.zip as string) ?? null,
     customer_phone: (row.phone as string) ?? null,
     work_summary: (row.work_summary as string) ?? null,
+    notes: (row.notes as string) ?? null,
     line_items: (await attachLineItems(num(row.invoice_id))).map((li) => ({
       description: li.description,
       cost_per_hour: li.cost_per_hour,
@@ -455,6 +457,22 @@ export async function getCustomerRates(): Promise<CustomerRate[]> {
     company: row.company as string,
     mileage_rate: row.mileage_rate == null ? null : num(row.mileage_rate),
   }));
+}
+
+/** Miles per calendar month, newest first — e.g. "Aug 2026". */
+export async function getMileageByMonth(
+  months = 12,
+): Promise<{ month: string; miles: number }[]> {
+  await initSchema();
+  const r = await sql`
+    SELECT to_char(date_trunc('month', entry_date), 'Mon YYYY') AS month,
+           date_trunc('month', entry_date) AS m,
+           SUM(miles) AS miles
+    FROM mileage WHERE entry_date IS NOT NULL
+    GROUP BY 1, 2 ORDER BY 2 DESC
+    LIMIT ${months};
+  `;
+  return r.rows.map((row) => ({ month: row.month as string, miles: num(row.miles) }));
 }
 
 export async function getMileageByYear(): Promise<{ year: string; miles: number }[]> {
