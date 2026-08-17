@@ -47,6 +47,55 @@ function normalizeLineItems(raw: unknown): LineItem[] {
     .filter((li) => li.description || li.line_total);
 }
 
+/** How many calendar days the invoice covers (for the hours sanity cap). */
+function workedDayCount(serviceDates: string[], start: string | null, end: string | null): number {
+  if (serviceDates.length) return serviceDates.length;
+  if (start && end) {
+    const a = new Date(`${start}T00:00:00`).getTime();
+    const b = new Date(`${end}T00:00:00`).getTime();
+    const days = Math.round((b - a) / 86400000) + 1;
+    if (Number.isFinite(days) && days > 1) return Math.min(days, 31);
+  }
+  return 1;
+}
+
+/**
+ * Guards against data-entry and parsing accidents ever reaching the database
+ * again (like 5.75 hours being saved as 575). Returns an error message, or
+ * null when the line items look sane.
+ */
+function lineItemProblem(lineItems: LineItem[], days: number): string | null {
+  const maxHours = 24 * days;
+  for (const li of lineItems) {
+    if ((li.qty ?? 0) < 0 || (li.cost_per_hour ?? 0) < 0 || li.line_total < 0) {
+      return `The "${li.description}" line has a negative number on it — please double-check it.`;
+    }
+    // Qty means hours only on lines that carry an hourly rate.
+    if (li.cost_per_hour == null || li.qty == null) continue;
+    if (li.qty > maxHours) {
+      return (
+        `The "${li.description}" line says ${li.qty} hours, but this invoice only covers ` +
+        `${days} day${days === 1 ? "" : "s"} (${maxHours} hours at most). ` +
+        `If you meant a decimal — 5.75, not 575 — fix the Qty and save again.`
+      );
+    }
+    // Rate × Qty should land near the line total. We only flag wild mismatches,
+    // so small rounding or adjustments never get in the way.
+    if (li.qty > 0 && li.cost_per_hour > 0 && li.line_total > 0) {
+      const expected = li.cost_per_hour * li.qty;
+      const diff = Math.abs(expected - li.line_total);
+      if (diff > Math.max(50, expected * 0.25)) {
+        return (
+          `On the "${li.description}" line, $${li.cost_per_hour} × ${li.qty} comes to ` +
+          `$${expected.toFixed(2)}, but the line total says $${li.line_total.toFixed(2)}. ` +
+          `One of those numbers is off — please double-check them.`
+        );
+      }
+    }
+  }
+  return null;
+}
+
 export async function POST(req: Request) {
   let body: Record<string, unknown>;
   try {
@@ -88,6 +137,16 @@ export async function POST(req: Request) {
       { error: "Please provide at least a customer, machine, or amount." },
       { status: 400 },
     );
+  }
+
+  const days = workedDayCount(
+    serviceDates,
+    data.invoice_date,
+    data.invoice_date_end,
+  );
+  const problem = lineItemProblem(lineItems, days);
+  if (problem) {
+    return NextResponse.json({ error: problem }, { status: 400 });
   }
 
   const paidDate = String(body.paid_date ?? "").trim();
