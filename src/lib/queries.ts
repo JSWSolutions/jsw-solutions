@@ -296,9 +296,18 @@ export async function getMonthlyWork(months = 18): Promise<MonthlyWork[]> {
     SELECT to_char(date_trunc('month', day), 'YYYY-MM') AS month, COUNT(*) AS days
     FROM d GROUP BY 1;
   `;
+  // Qty only means "hours" on an hourly labor line. Parts and flat charges can
+  // carry a qty too (a count of pieces, or a misparsed number), so we only sum
+  // lines that have an hourly rate and were actually billed — same standard the
+  // auto-mileage TRAVEL rule uses.
   const hoursR = await sql`
     SELECT to_char(date_trunc('month', i.invoice_date), 'YYYY-MM') AS month,
-           COALESCE(SUM(li.qty), 0) AS hours
+           COALESCE(SUM(li.qty) FILTER (
+             WHERE upper(li.description) <> 'PARTS'
+               AND li.cost_per_hour IS NOT NULL
+               AND COALESCE(li.qty, 0) > 0
+               AND COALESCE(li.line_total, 0) > 0
+           ), 0) AS hours
     FROM invoices i JOIN line_items li ON li.invoice_id = i.id
     WHERE i.invoice_date IS NOT NULL
     GROUP BY 1;

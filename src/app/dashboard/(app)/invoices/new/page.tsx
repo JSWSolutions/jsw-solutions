@@ -78,6 +78,47 @@ const EMPTY: FormState = {
   total: "",
 };
 
+/**
+ * While a line item is being edited we keep the numeric boxes as plain text.
+ * If we stored them as numbers, every keystroke would round-trip through
+ * Number() — and since Number("5.") is 5, the decimal point would vanish as
+ * you type. That's how "5.75" once became 575.
+ */
+type ItemDraft = {
+  description: string;
+  cost_per_hour: string;
+  qty: string;
+  line_total: string;
+  sort_order: number;
+};
+
+function toDraft(li: LineItem): ItemDraft {
+  return {
+    description: li.description ?? "",
+    cost_per_hour: li.cost_per_hour == null ? "" : String(li.cost_per_hour),
+    qty: li.qty == null ? "" : String(li.qty),
+    line_total: li.line_total == null ? "" : String(li.line_total),
+    sort_order: li.sort_order ?? 0,
+  };
+}
+
+/** "" → null; anything unparseable → NaN so the caller can complain. */
+function draftNum(s: string): number | null {
+  const t = s.trim();
+  if (!t) return null;
+  return Number(t);
+}
+
+function fromDraft(d: ItemDraft, i: number): LineItem {
+  return {
+    description: d.description.trim(),
+    cost_per_hour: draftNum(d.cost_per_hour),
+    qty: draftNum(d.qty),
+    line_total: draftNum(d.line_total) ?? 0,
+    sort_order: i,
+  };
+}
+
 function parsedToForm(p: ParsedInvoice): FormState {
   return {
     po_number: p.po_number ?? "",
@@ -103,7 +144,7 @@ export default function NewInvoicePage() {
   const [notice, setNotice] = useState("");
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY);
-  const [items, setItems] = useState<LineItem[]>([]);
+  const [items, setItems] = useState<ItemDraft[]>([]);
   const [dates, setDates] = useState<string[]>([""]);
   const [paid, setPaid] = useState(false);
   const [paidDate, setPaidDate] = useState(todayLocal());
@@ -179,7 +220,7 @@ export default function NewInvoicePage() {
         }
       }
 
-      setItems(parsed.line_items ?? []);
+      setItems((parsed.line_items ?? []).map(toDraft));
       setPdfUrl(json.pdfUrl ?? null);
       setNotice(
         "We read the PDF and filled in what we found. Please double-check everything below before saving.",
@@ -216,13 +257,13 @@ export default function NewInvoicePage() {
     setAskRange(false);
   }
 
-  function updateItem(i: number, patch: Partial<LineItem>) {
+  function updateItem(i: number, patch: Partial<ItemDraft>) {
     setItems((arr) => arr.map((li, idx) => (idx === i ? { ...li, ...patch } : li)));
   }
   function addItem() {
     setItems((arr) => [
       ...arr,
-      { description: "", cost_per_hour: null, qty: null, line_total: 0, sort_order: arr.length },
+      { description: "", cost_per_hour: "", qty: "", line_total: "", sort_order: arr.length },
     ]);
   }
   function removeItem(i: number) {
@@ -298,13 +339,29 @@ export default function NewInvoicePage() {
   async function submit() {
     setSaving(true);
     setError("");
+    // Turn the text drafts back into numbers, and refuse to save if any of the
+    // numeric boxes contain something that isn't a number.
+    const lineItems = items.map(fromDraft);
+    const bad = lineItems.find(
+      (li) =>
+        (li.cost_per_hour != null && !Number.isFinite(li.cost_per_hour)) ||
+        (li.qty != null && !Number.isFinite(li.qty)) ||
+        !Number.isFinite(li.line_total),
+    );
+    if (bad) {
+      setError(
+        `One of the numbers on the "${bad.description || "blank"}" line doesn't look right. Rate, Qty, and Total should be plain numbers like 5.75 or 155.`,
+      );
+      setSaving(false);
+      return;
+    }
     const totalOverride = form.total.trim() ? Number(form.total) : computedTotal;
     const payload = {
       data: {
         ...form,
         service_dates: chosenDates,
         total: totalOverride,
-        line_items: items,
+        line_items: lineItems,
       },
       pdfUrl,
       paid,
@@ -508,22 +565,23 @@ export default function NewInvoicePage() {
               <input
                 className="col-span-4 rounded border border-slate-300 px-2 py-1 text-right text-sm sm:col-span-2"
                 placeholder="Rate"
-                value={li.cost_per_hour ?? ""}
-                onChange={(e) =>
-                  updateItem(i, { cost_per_hour: e.target.value === "" ? null : Number(e.target.value) })
-                }
+                inputMode="decimal"
+                value={li.cost_per_hour}
+                onChange={(e) => updateItem(i, { cost_per_hour: e.target.value })}
               />
               <input
                 className="col-span-3 rounded border border-slate-300 px-2 py-1 text-right text-sm sm:col-span-1"
                 placeholder="Qty"
-                value={li.qty ?? ""}
-                onChange={(e) => updateItem(i, { qty: e.target.value === "" ? null : Number(e.target.value) })}
+                inputMode="decimal"
+                value={li.qty}
+                onChange={(e) => updateItem(i, { qty: e.target.value })}
               />
               <input
                 className="col-span-4 rounded border border-slate-300 px-2 py-1 text-right text-sm sm:col-span-3"
                 placeholder="Total"
-                value={li.line_total || ""}
-                onChange={(e) => updateItem(i, { line_total: Number(e.target.value) || 0 })}
+                inputMode="decimal"
+                value={li.line_total}
+                onChange={(e) => updateItem(i, { line_total: e.target.value })}
               />
               <button
                 onClick={() => removeItem(i)}
