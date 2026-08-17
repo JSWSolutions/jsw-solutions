@@ -35,7 +35,6 @@ export default async function EditCustomerPage({
           state: c.state ?? "",
           zip: c.zip ?? "",
           phone: c.phone ?? "",
-          mileage_rate: c.mileage_rate == null ? "" : String(c.mileage_rate),
         }}
       />
     </div>

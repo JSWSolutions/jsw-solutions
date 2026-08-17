@@ -542,7 +542,10 @@ export async function updateCustomer(
       state = ${p.state},
       zip = ${p.zip},
       phone = ${p.phone},
-      mileage_rate = ${p.mileage_rate}
+      -- The rate isn't edited anywhere anymore (MILES lines drive mileage now),
+      -- but old rates stay put — they're still the fallback for old invoices
+      -- that never had a MILES line.
+      mileage_rate = COALESCE(${p.mileage_rate}::numeric, mileage_rate)
     WHERE id = ${id};
   `;
   if (oldName !== company) {

@@ -12,7 +12,6 @@ export interface CustomerFormValues {
   state: string;
   zip: string;
   phone: string;
-  mileage_rate: string;
 }
 
 const BLANK: CustomerFormValues = {
@@ -23,7 +22,6 @@ const BLANK: CustomerFormValues = {
   state: "",
   zip: "",
   phone: "",
-  mileage_rate: "",
 };
 
 /**
@@ -46,10 +44,6 @@ export function CustomerForm({ initial }: { initial?: CustomerFormValues }) {
       setError("Company name is required.");
       return;
     }
-    if (v.mileage_rate.trim() && !Number.isFinite(Number(v.mileage_rate))) {
-      setError("Miles per travel hour should be a plain number, like 45.");
-      return;
-    }
     setBusy(true);
     setError("");
     try {
@@ -66,7 +60,6 @@ export function CustomerForm({ initial }: { initial?: CustomerFormValues }) {
             state: v.state,
             zip: v.zip,
             phone: v.phone,
-            mileage_rate: v.mileage_rate.trim() ? Number(v.mileage_rate) : null,
           }),
         },
       );
@@ -114,15 +107,6 @@ export function CustomerForm({ initial }: { initial?: CustomerFormValues }) {
           <input className={input} value={v.zip} onChange={(e) => set("zip", e.target.value)} />
         </Field>
       </div>
-      <Field label="Miles per travel hour (for the automatic mileage log)">
-        <input
-          className={input}
-          inputMode="decimal"
-          placeholder="e.g. 45 — leave blank if unknown"
-          value={v.mileage_rate}
-          onChange={(e) => set("mileage_rate", e.target.value)}
-        />
-      </Field>
       <p className="text-xs text-slate-500">
         The ZIP code is also what customers type alongside their PO number to pay
         an invoice by card on the website — keep it current.

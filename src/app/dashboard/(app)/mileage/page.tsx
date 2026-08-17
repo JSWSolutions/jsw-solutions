@@ -1,8 +1,7 @@
 import { unstable_noStore as noStore } from "next/cache";
-import { getMileageLog, getMileageTotals, getMileageByYear, getCustomerRates } from "@/lib/queries";
+import { getMileageLog, getMileageTotals, getMileageByYear } from "@/lib/queries";
 import { shortDate } from "@/lib/format";
 import { ManualMileageForm } from "@/components/dashboard/ManualMileageForm";
-import { RateEditor } from "@/components/dashboard/RateEditor";
 import { RecalcMileageButton } from "@/components/dashboard/RecalcMileageButton";
 
 export const dynamic = "force-dynamic";
@@ -23,11 +22,10 @@ function Stat({ label, value, accent = false }: { label: string; value: string; 
 
 export default async function MileagePage() {
   noStore();
-  const [totals, log, byYear, rates] = await Promise.all([
+  const [totals, log, byYear] = await Promise.all([
     getMileageTotals(),
     getMileageLog(),
     getMileageByYear(),
-    getCustomerRates(),
   ]);
 
   return (
@@ -36,8 +34,8 @@ export default async function MileagePage() {
         <div>
           <h1 className="text-2xl font-extrabold text-slate-900">Mileage Log</h1>
           <p className="text-slate-500">
-            Auto-logged one trip per customer per service day — a MILES line&apos;s
-            quantity when the invoice has one, travel hours × rate otherwise.
+            Auto-logged one trip per customer per service day, straight from each
+            invoice&apos;s MILES line.
           </p>
         </div>
         <RecalcMileageButton />
@@ -48,8 +46,6 @@ export default async function MileagePage() {
         <Stat label="Miles this year" value={miles(totals.thisYear)} accent />
         <Stat label="Miles all-time" value={miles(totals.allTime)} />
       </div>
-
-      <RateEditor rates={rates} />
 
       <ManualMileageForm />
 
