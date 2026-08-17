@@ -268,6 +268,64 @@ export async function getInvoiceById(id: number): Promise<InvoiceFull | null> {
   return { ...base, line_items: await attachLineItems(base.id) };
 }
 
+// ---- invoice → PDF --------------------------------------------------------
+
+import type { InvoicePdfData } from "./invoice-pdf";
+
+/** Everything the PDF generator needs, joined in one trip. */
+export async function getInvoiceForPdf(id: number): Promise<InvoicePdfData | null> {
+  await initSchema();
+  const r = await sql`
+    SELECT i.po_number,
+           to_char(i.invoice_date, 'YYYY-MM-DD') AS invoice_date_str,
+           to_char(i.invoice_date_end, 'YYYY-MM-DD') AS invoice_date_end_str,
+           CASE WHEN i.service_dates IS NULL THEN NULL ELSE
+             (SELECT array_agg(to_char(d, 'YYYY-MM-DD') ORDER BY d)
+              FROM unnest(i.service_dates) AS d)
+           END AS service_dates_str,
+           i.work_summary, i.total, i.paid,
+           to_char(i.paid_date, 'YYYY-MM-DD') AS paid_date_str,
+           i.check_number, i.payment_method, i.id AS invoice_id,
+           c.company, c.contact_name, c.address, c.city, c.state, c.zip, c.phone,
+           m.machine_id AS machine_label
+    FROM invoices i
+    LEFT JOIN customers c ON c.id = i.customer_id
+    LEFT JOIN machines m ON m.id = i.machine_id
+    WHERE i.id = ${id} LIMIT 1;
+  `;
+  if (r.rows.length === 0) return null;
+  const row = r.rows[0];
+  const dates: string[] = Array.isArray(row.service_dates_str)
+    ? (row.service_dates_str as string[])
+    : [row.invoice_date_str, row.invoice_date_end_str].filter(
+        (d, i, a): d is string => Boolean(d) && a.indexOf(d) === i,
+      );
+  return {
+    po_number: (row.po_number as string) ?? null,
+    machine_label: (row.machine_label as string) ?? null,
+    dates,
+    customer_company: (row.company as string) ?? null,
+    customer_contact: (row.contact_name as string) ?? null,
+    customer_address: (row.address as string) ?? null,
+    customer_city: (row.city as string) ?? null,
+    customer_state: (row.state as string) ?? null,
+    customer_zip: (row.zip as string) ?? null,
+    customer_phone: (row.phone as string) ?? null,
+    work_summary: (row.work_summary as string) ?? null,
+    line_items: (await attachLineItems(num(row.invoice_id))).map((li) => ({
+      description: li.description,
+      cost_per_hour: li.cost_per_hour,
+      qty: li.qty,
+      line_total: li.line_total,
+    })),
+    total: num(row.total),
+    paid: Boolean(row.paid),
+    paid_date: (row.paid_date_str as string) ?? null,
+    check_number: (row.check_number as string) ?? null,
+    payment_method: (row.payment_method as string) ?? null,
+  };
+}
+
 // ---- days & hours worked per month ---------------------------------------
 
 export interface MonthlyWork {

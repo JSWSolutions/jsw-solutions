@@ -18,7 +18,15 @@ export default async function CustomersPage({
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-extrabold text-slate-900">Customers</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-extrabold text-slate-900">Customers</h1>
+        <Link
+          href="/dashboard/customers/new"
+          className="rounded-lg bg-brand-green px-4 py-2 text-sm font-semibold text-white hover:bg-brand-green-dark"
+        >
+          + Add customer
+        </Link>
+      </div>
 
       <form className="flex gap-2">
         <input
@@ -42,12 +50,13 @@ export default async function CustomersPage({
               <th className="px-4 py-3 text-right">Jobs</th>
               <th className="px-4 py-3 text-right">Total billed</th>
               <th className="px-4 py-3">Last service</th>
+              <th className="px-4 py-3"></th>
             </tr>
           </thead>
           <tbody>
             {customers.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
                   No customers yet.
                 </td>
               </tr>
@@ -71,6 +80,14 @@ export default async function CustomersPage({
                   {money(c.total_billed)}
                 </td>
                 <td className="px-4 py-3">{shortDate(c.last_service)}</td>
+                <td className="px-4 py-3 text-right">
+                  <Link
+                    href={`/dashboard/customers/${c.id}`}
+                    className="font-semibold text-brand-green-dark hover:underline"
+                  >
+                    Edit
+                  </Link>
+                </td>
               </tr>
             ))}
           </tbody>

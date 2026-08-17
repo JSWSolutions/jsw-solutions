@@ -393,6 +393,129 @@ export async function addManualMileage(entry: {
   return r.rows[0].id as number;
 }
 
+// ---- customer management (the Customers page and invoice-form dropdowns) ---
+
+export interface CustomerDetails {
+  id: number;
+  company: string;
+  contact_name: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  phone: string | null;
+  mileage_rate: number | null;
+}
+
+function rowToCustomer(row: Record<string, unknown>): CustomerDetails {
+  return {
+    id: Number(row.id),
+    company: row.company as string,
+    contact_name: (row.contact_name as string) ?? null,
+    address: (row.address as string) ?? null,
+    city: (row.city as string) ?? null,
+    state: (row.state as string) ?? null,
+    zip: (row.zip as string) ?? null,
+    phone: (row.phone as string) ?? null,
+    mileage_rate: row.mileage_rate == null ? null : Number(row.mileage_rate),
+  };
+}
+
+export async function listCustomerDetails(): Promise<CustomerDetails[]> {
+  await initSchema();
+  const r = await sql`
+    SELECT id, company, contact_name, address, city, state, zip, phone, mileage_rate
+    FROM customers ORDER BY company ASC;
+  `;
+  return r.rows.map(rowToCustomer);
+}
+
+export async function getCustomerDetails(id: number): Promise<CustomerDetails | null> {
+  await initSchema();
+  const r = await sql`
+    SELECT id, company, contact_name, address, city, state, zip, phone, mileage_rate
+    FROM customers WHERE id = ${id} LIMIT 1;
+  `;
+  return r.rows.length ? rowToCustomer(r.rows[0]) : null;
+}
+
+/** Creates a customer outright; returns null if the company name is taken. */
+export async function createCustomer(p: {
+  company: string;
+  contact_name?: string | null;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip?: string | null;
+  phone?: string | null;
+  mileage_rate?: number | null;
+}): Promise<CustomerDetails | null> {
+  await initSchema();
+  const company = p.company.trim();
+  const dup = await sql`
+    SELECT id FROM customers WHERE lower(company) = lower(${company}) LIMIT 1;
+  `;
+  if (dup.rows.length > 0) return null;
+  const r = await sql`
+    INSERT INTO customers (company, contact_name, address, city, state, zip, phone, mileage_rate)
+    VALUES (${company}, ${p.contact_name ?? null}, ${p.address ?? null}, ${p.city ?? null},
+            ${p.state ?? null}, ${p.zip ?? null}, ${p.phone ?? null}, ${p.mileage_rate ?? null})
+    RETURNING id, company, contact_name, address, city, state, zip, phone, mileage_rate;
+  `;
+  return rowToCustomer(r.rows[0]);
+}
+
+/**
+ * Updates a customer's details. Renaming a company also renames its mileage
+ * log entries, which are keyed by company name.
+ */
+export async function updateCustomer(
+  id: number,
+  p: {
+    company: string;
+    contact_name: string | null;
+    address: string | null;
+    city: string | null;
+    state: string | null;
+    zip: string | null;
+    phone: string | null;
+    mileage_rate: number | null;
+  },
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  await initSchema();
+  const company = p.company.trim();
+  if (!company) return { ok: false, error: "Company name can't be empty." };
+  const current = await sql`SELECT company FROM customers WHERE id = ${id} LIMIT 1;`;
+  if (current.rows.length === 0) return { ok: false, error: "Customer not found." };
+  const oldName = current.rows[0].company as string;
+
+  const dup = await sql`
+    SELECT id FROM customers
+    WHERE lower(company) = lower(${company}) AND id <> ${id} LIMIT 1;
+  `;
+  if (dup.rows.length > 0) {
+    return { ok: false, error: "Another customer already uses that company name." };
+  }
+
+  await sql`
+    UPDATE customers SET
+      company = ${company},
+      contact_name = ${p.contact_name},
+      address = ${p.address},
+      city = ${p.city},
+      state = ${p.state},
+      zip = ${p.zip},
+      phone = ${p.phone},
+      mileage_rate = ${p.mileage_rate}
+    WHERE id = ${id};
+  `;
+  if (oldName !== company) {
+    // Mileage rows are linked by company name; keep them attached.
+    await sql`UPDATE mileage SET customer_name = ${company} WHERE customer_name = ${oldName};`;
+  }
+  return { ok: true };
+}
+
 /** Finds a customer by company name (case-insensitive) or creates one. */
 export async function upsertCustomer(p: {
   company: string;

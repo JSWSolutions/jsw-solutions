@@ -1,8 +1,21 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { LineItem, ParsedInvoice } from "@/lib/types";
+
+/** What the company / machine dropdowns are populated with. */
+type CustomerOpt = {
+  id: number;
+  company: string;
+  contact_name: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  phone: string | null;
+};
+type MachineOpt = { id: number; machine_id: string; customer_id: number | null };
 
 const MAX_DATES = 5;
 
@@ -158,6 +171,70 @@ export default function NewInvoicePage() {
   const [rangePicked, setRangePicked] = useState<string[]>([]);
   const [rangeError, setRangeError] = useState("");
 
+  // Dropdown data for picking an existing company / machine.
+  const [customers, setCustomers] = useState<CustomerOpt[]>([]);
+  const [machines, setMachines] = useState<MachineOpt[]>([]);
+  const [companyChoice, setCompanyChoice] = useState(""); // "", customer id, or "new"
+  const [machineChoice, setMachineChoice] = useState(""); // "", machine label, or "new"
+
+  useEffect(() => {
+    fetch("/api/customers", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => setCustomers(j.customers ?? []))
+      .catch(() => {});
+    fetch("/api/machines", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => setMachines(j.machines ?? []))
+      .catch(() => {});
+  }, []);
+
+  const chosenCustomer = useMemo(
+    () => customers.find((c) => String(c.id) === companyChoice) ?? null,
+    [customers, companyChoice],
+  );
+
+  /** Selecting a company fills its saved details into the form. */
+  function pickCompany(choice: string) {
+    setCompanyChoice(choice);
+    setMachineChoice("");
+    if (choice === "new" || choice === "") {
+      setForm((f) => ({
+        ...f,
+        customer_company: "",
+        customer_contact: "",
+        customer_address: "",
+        customer_city: "",
+        customer_state: "",
+        customer_zip: "",
+        customer_phone: "",
+        machine_id: "",
+      }));
+      return;
+    }
+    const c = customers.find((x) => String(x.id) === choice);
+    if (!c) return;
+    setForm((f) => ({
+      ...f,
+      customer_company: c.company,
+      customer_contact: c.contact_name ?? "",
+      customer_address: c.address ?? "",
+      customer_city: c.city ?? "",
+      customer_state: c.state ?? "",
+      customer_zip: c.zip ?? "",
+      customer_phone: c.phone ?? "",
+      machine_id: "",
+    }));
+  }
+
+  function pickMachine(choice: string) {
+    setMachineChoice(choice);
+    if (choice === "new" || choice === "") {
+      set("machine_id", "");
+    } else {
+      set("machine_id", choice);
+    }
+  }
+
   const computedTotal = useMemo(
     () => items.reduce((s, li) => s + (Number(li.line_total) || 0), 0),
     [items],
@@ -221,6 +298,19 @@ export default function NewInvoicePage() {
       }
 
       setItems((parsed.line_items ?? []).map(toDraft));
+
+      // Line the dropdowns up with what the PDF said.
+      const parsedCompany = (parsed.customer_company ?? "").trim().toLowerCase();
+      const companyMatch = customers.find(
+        (c) => c.company.trim().toLowerCase() === parsedCompany,
+      );
+      setCompanyChoice(companyMatch ? String(companyMatch.id) : parsedCompany ? "new" : "");
+      const parsedMachine = (parsed.machine_id ?? "").trim().toLowerCase();
+      const machineMatch = machines.find(
+        (m) => m.machine_id.trim().toLowerCase() === parsedMachine,
+      );
+      setMachineChoice(machineMatch ? machineMatch.machine_id : parsedMachine ? "new" : "");
+
       setPdfUrl(json.pdfUrl ?? null);
       setNotice(
         "We read the PDF and filled in what we found. Please double-check everything below before saving.",
@@ -258,7 +348,27 @@ export default function NewInvoicePage() {
   }
 
   function updateItem(i: number, patch: Partial<ItemDraft>) {
-    setItems((arr) => arr.map((li, idx) => (idx === i ? { ...li, ...patch } : li)));
+    setItems((arr) =>
+      arr.map((li, idx) => {
+        if (idx !== i) return li;
+        const next = { ...li, ...patch };
+        // The math does itself: whenever Rate and Qty are both filled in,
+        // the line total is computed for you (you can still overtype it).
+        if ("cost_per_hour" in patch || "qty" in patch) {
+          const r = Number(next.cost_per_hour);
+          const q = Number(next.qty);
+          if (
+            next.cost_per_hour.trim() !== "" &&
+            next.qty.trim() !== "" &&
+            Number.isFinite(r) &&
+            Number.isFinite(q)
+          ) {
+            next.line_total = String(Math.round(r * q * 100) / 100);
+          }
+        }
+        return next;
+      }),
+    );
   }
   function addItem() {
     setItems((arr) => [
@@ -340,8 +450,12 @@ export default function NewInvoicePage() {
     setSaving(true);
     setError("");
     // Turn the text drafts back into numbers, and refuse to save if any of the
-    // numeric boxes contain something that isn't a number.
-    const lineItems = items.map(fromDraft);
+    // numeric boxes contain something that isn't a number. Rows left completely
+    // empty (like an untouched MILES or PER DIEM template row) are dropped.
+    const lineItems = items
+      .map(fromDraft)
+      .filter((li) => (li.qty ?? 0) !== 0 || li.line_total !== 0)
+      .map((li, i) => ({ ...li, sort_order: i }));
     const bad = lineItems.find(
       (li) =>
         (li.cost_per_hour != null && !Number.isFinite(li.cost_per_hour)) ||
@@ -419,13 +533,21 @@ export default function NewInvoicePage() {
           <button
             onClick={() => {
               setForm(EMPTY);
-              setItems([]);
+              // Start from the same rows the paper template has, rates prefilled.
+              setItems([
+                { description: "SERVICE", cost_per_hour: "155", qty: "", line_total: "", sort_order: 0 },
+                { description: "TRAVEL", cost_per_hour: "65", qty: "", line_total: "", sort_order: 1 },
+                { description: "MILES", cost_per_hour: "", qty: "", line_total: "", sort_order: 2 },
+                { description: "PER DIEM", cost_per_hour: "", qty: "", line_total: "", sort_order: 3 },
+              ]);
               setDates([todayLocal()]);
+              setCompanyChoice("");
+              setMachineChoice("");
               setStep("form");
             }}
-            className="text-sm font-medium text-slate-500 hover:text-brand-orange"
+            className="rounded-lg border border-brand-green px-5 py-2.5 text-sm font-semibold text-brand-green-dark hover:bg-brand-green hover:text-white"
           >
-            or enter the invoice manually →
+            Create an invoice from scratch →
           </button>
         </div>
         {error && <p className="text-center text-sm text-red-600">{error}</p>}
@@ -457,7 +579,45 @@ export default function NewInvoicePage() {
       <Section title="Invoice">
         <Grid>
           <Input label="PO #" value={form.po_number} onChange={(v) => set("po_number", v)} />
-          <Input label="Machine ID" value={form.machine_id} onChange={(v) => set("machine_id", v)} />
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-600">Machine</label>
+            <select
+              value={machineChoice}
+              onChange={(e) => pickMachine(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-orange"
+            >
+              <option value="">— pick a machine —</option>
+              {chosenCustomer && (
+                <optgroup label={`${chosenCustomer.company}'s machines`}>
+                  {machines
+                    .filter((m) => m.customer_id === chosenCustomer.id)
+                    .map((m) => (
+                      <option key={m.id} value={m.machine_id}>
+                        {m.machine_id}
+                      </option>
+                    ))}
+                </optgroup>
+              )}
+              <optgroup label={chosenCustomer ? "All other machines" : "All machines"}>
+                {machines
+                  .filter((m) => !chosenCustomer || m.customer_id !== chosenCustomer.id)
+                  .map((m) => (
+                    <option key={m.id} value={m.machine_id}>
+                      {m.machine_id}
+                    </option>
+                  ))}
+              </optgroup>
+              <option value="new">➕ Add a new machine…</option>
+            </select>
+            {machineChoice === "new" && (
+              <input
+                value={form.machine_id}
+                onChange={(e) => set("machine_id", e.target.value)}
+                placeholder="New machine ID, e.g. LB-15#9701"
+                className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-orange"
+              />
+            )}
+          </div>
         </Grid>
 
         <div className="mt-4">
@@ -522,8 +682,28 @@ export default function NewInvoicePage() {
       </Section>
 
       <Section title="Customer">
+        <div className="mb-4">
+          <label className="mb-1 block text-sm font-medium text-slate-600">Company</label>
+          <select
+            value={companyChoice}
+            onChange={(e) => pickCompany(e.target.value)}
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-orange"
+          >
+            <option value="">— pick a company —</option>
+            {customers.map((c) => (
+              <option key={c.id} value={String(c.id)}>
+                {c.company}
+              </option>
+            ))}
+            <option value="new">➕ Add a new company…</option>
+          </select>
+          <p className="mt-1 text-xs text-slate-500">
+            Picking a company fills in its saved details below. To permanently change a
+            company&apos;s info, use the Customers page.
+          </p>
+        </div>
         <Grid>
-          <Input label="Company" value={form.customer_company} onChange={(v) => set("customer_company", v)} />
+          <Input label="Company name" value={form.customer_company} onChange={(v) => set("customer_company", v)} />
           <Input label="Contact name" value={form.customer_contact} onChange={(v) => set("customer_contact", v)} />
           <Input label="Phone" value={form.customer_phone} onChange={(v) => set("customer_phone", v)} />
           <Input label="Address" value={form.customer_address} onChange={(v) => set("customer_address", v)} />

@@ -27,16 +27,32 @@ export default async function InvoiceDetailPage({
         <Link href="/dashboard/invoices" className="text-sm text-slate-500 hover:underline">
           ← Back to invoices
         </Link>
-        {inv.pdf_url && (
+        <div className="flex flex-wrap gap-2">
           <a
-            href={inv.pdf_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            href={`/api/invoices/${inv.id}/pdf`}
+            className="rounded-lg bg-brand-green px-4 py-2 text-sm font-semibold text-white hover:bg-brand-green-dark"
           >
-            View original PDF ↗
+            {inv.paid ? "Download PDF (paid)" : "Download PDF"}
           </a>
-        )}
+          {inv.paid && (
+            <a
+              href={`/api/invoices/${inv.id}/pdf?form=unpaid`}
+              className="rounded-lg border border-brand-green px-4 py-2 text-sm font-semibold text-brand-green-dark hover:bg-brand-green/10"
+            >
+              Download unpaid form
+            </a>
+          )}
+          {inv.pdf_url && (
+            <a
+              href={inv.pdf_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              View original PDF ↗
+            </a>
+          )}
+        </div>
       </div>
 
       <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
