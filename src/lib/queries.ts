@@ -333,7 +333,9 @@ export async function getInvoiceForPdf(id: number): Promise<InvoicePdfData | nul
 export interface MonthlyWork {
   month: string; // yyyy-mm
   days: number; // distinct calendar days worked (ranges expanded)
-  hours: number; // sum of all labor line hours
+  hours: number; // sum of SERVICE + TRAVEL hours
+  perDiem: number; // dollars billed on PER DIEM lines
+  perDiemDays: number; // number of days billed as per diem
 }
 
 export async function getMonthlyWork(months = 18): Promise<MonthlyWork[]> {
@@ -365,21 +367,38 @@ export async function getMonthlyWork(months = 18): Promise<MonthlyWork[]> {
              WHERE upper(li.description) IN ('SERVICE', 'TRAVEL')
                AND COALESCE(li.qty, 0) > 0
                AND COALESCE(li.line_total, 0) > 0
-           ), 0) AS hours
+           ), 0) AS hours,
+           -- PER DIEM: the dollars billed, and how many days that covered.
+           COALESCE(SUM(li.line_total) FILTER (
+             WHERE upper(li.description) = 'PER DIEM'
+           ), 0) AS per_diem,
+           COALESCE(SUM(li.qty) FILTER (
+             WHERE upper(li.description) = 'PER DIEM'
+               AND COALESCE(li.qty, 0) > 0
+           ), 0) AS per_diem_days
     FROM invoices i JOIN line_items li ON li.invoice_id = i.id
     WHERE i.invoice_date IS NOT NULL
     GROUP BY 1;
   `;
+  const blank = (m: string): MonthlyWork => ({
+    month: m,
+    days: 0,
+    hours: 0,
+    perDiem: 0,
+    perDiemDays: 0,
+  });
   const byMonth: Record<string, MonthlyWork> = {};
   for (const row of daysR.rows) {
     const m = row.month as string;
-    byMonth[m] = byMonth[m] || { month: m, days: 0, hours: 0 };
+    byMonth[m] = byMonth[m] || blank(m);
     byMonth[m].days = num(row.days);
   }
   for (const row of hoursR.rows) {
     const m = row.month as string;
-    byMonth[m] = byMonth[m] || { month: m, days: 0, hours: 0 };
+    byMonth[m] = byMonth[m] || blank(m);
     byMonth[m].hours = num(row.hours);
+    byMonth[m].perDiem = num(row.per_diem);
+    byMonth[m].perDiemDays = num(row.per_diem_days);
   }
   return Object.values(byMonth)
     .sort((a, b) => a.month.localeCompare(b.month))

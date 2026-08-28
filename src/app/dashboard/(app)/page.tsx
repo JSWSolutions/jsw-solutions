@@ -46,6 +46,11 @@ export default async function OverviewPage() {
 
   const maxMonth = Math.max(1, ...monthly.map((m) => m.total));
   const recentWork = [...work].reverse();
+  // Per diem billed so far this calendar year.
+  const thisYear = String(new Date().getFullYear());
+  const perDiemYearTotal = work
+    .filter((w) => w.month.startsWith(thisYear))
+    .reduce((sum, w) => sum + w.perDiem, 0);
 
   return (
     <div className="space-y-8">
@@ -67,18 +72,30 @@ export default async function OverviewPage() {
         <Stat label="Machines serviced" value={String(totals.machineCount)} />
       </div>
 
-      {/* Days & hours worked per month */}
+      {/* Days, hours & per diem per month */}
       <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="mb-4 font-bold text-slate-900">Days &amp; hours worked</h2>
+        <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="font-bold text-slate-900">Days, hours &amp; per diem</h2>
+          {perDiemYearTotal > 0 && (
+            <p className="text-sm text-slate-500">
+              Per diem so far in {new Date().getFullYear()}:{" "}
+              <span className="font-bold text-brand-green-dark">
+                {money(perDiemYearTotal)}
+              </span>
+            </p>
+          )}
+        </div>
         {recentWork.length === 0 ? (
           <p className="text-sm text-slate-500">No work logged yet.</p>
         ) : (
-          <table className="w-full max-w-lg text-sm">
+          <table className="w-full max-w-2xl text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-left text-slate-500">
                 <th className="py-2">Month</th>
                 <th className="py-2 text-right">Days worked</th>
                 <th className="py-2 text-right">Hours</th>
+                <th className="py-2 text-right">Per diem days</th>
+                <th className="py-2 text-right">Per diem $</th>
               </tr>
             </thead>
             <tbody>
@@ -88,6 +105,14 @@ export default async function OverviewPage() {
                   <td className="py-2 text-right">{w.days}</td>
                   <td className="py-2 text-right">
                     {w.hours.toLocaleString("en-US", { maximumFractionDigits: 1 })}
+                  </td>
+                  <td className="py-2 text-right text-slate-500">
+                    {w.perDiemDays
+                      ? w.perDiemDays.toLocaleString("en-US", { maximumFractionDigits: 1 })
+                      : "—"}
+                  </td>
+                  <td className="py-2 text-right font-semibold text-brand-green-dark">
+                    {w.perDiem ? money(w.perDiem) : "—"}
                   </td>
                 </tr>
               ))}
