@@ -84,6 +84,20 @@ export async function initSchema() {
   await sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS service_dates DATE[];`;
   // The invoice's NOTES box (separate from the work summary).
   await sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS notes TEXT;`;
+  // Where invoice emails go for this customer.
+  await sql`ALTER TABLE customers ADD COLUMN IF NOT EXISTS email TEXT;`;
+  // Every email the dashboard sends, so each invoice shows its history.
+  await sql`
+    CREATE TABLE IF NOT EXISTS email_log (
+      id          SERIAL PRIMARY KEY,
+      invoice_id  INTEGER REFERENCES invoices(id) ON DELETE CASCADE,
+      kind        TEXT NOT NULL,
+      to_address  TEXT NOT NULL,
+      subject     TEXT NOT NULL,
+      sent_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_email_log_invoice ON email_log(invoice_id);`;
 
   await sql`
     CREATE TABLE IF NOT EXISTS mileage (
@@ -442,6 +456,7 @@ export interface CustomerDetails {
   state: string | null;
   zip: string | null;
   phone: string | null;
+  email: string | null;
   mileage_rate: number | null;
 }
 
@@ -455,6 +470,7 @@ function rowToCustomer(row: Record<string, unknown>): CustomerDetails {
     state: (row.state as string) ?? null,
     zip: (row.zip as string) ?? null,
     phone: (row.phone as string) ?? null,
+    email: (row.email as string) ?? null,
     mileage_rate: row.mileage_rate == null ? null : Number(row.mileage_rate),
   };
 }
@@ -462,7 +478,7 @@ function rowToCustomer(row: Record<string, unknown>): CustomerDetails {
 export async function listCustomerDetails(): Promise<CustomerDetails[]> {
   await initSchema();
   const r = await sql`
-    SELECT id, company, contact_name, address, city, state, zip, phone, mileage_rate
+    SELECT id, company, contact_name, address, city, state, zip, phone, email, mileage_rate
     FROM customers ORDER BY company ASC;
   `;
   return r.rows.map(rowToCustomer);
@@ -471,7 +487,7 @@ export async function listCustomerDetails(): Promise<CustomerDetails[]> {
 export async function getCustomerDetails(id: number): Promise<CustomerDetails | null> {
   await initSchema();
   const r = await sql`
-    SELECT id, company, contact_name, address, city, state, zip, phone, mileage_rate
+    SELECT id, company, contact_name, address, city, state, zip, phone, email, mileage_rate
     FROM customers WHERE id = ${id} LIMIT 1;
   `;
   return r.rows.length ? rowToCustomer(r.rows[0]) : null;
@@ -486,6 +502,7 @@ export async function createCustomer(p: {
   state?: string | null;
   zip?: string | null;
   phone?: string | null;
+  email?: string | null;
   mileage_rate?: number | null;
 }): Promise<CustomerDetails | null> {
   await initSchema();
@@ -495,10 +512,11 @@ export async function createCustomer(p: {
   `;
   if (dup.rows.length > 0) return null;
   const r = await sql`
-    INSERT INTO customers (company, contact_name, address, city, state, zip, phone, mileage_rate)
+    INSERT INTO customers (company, contact_name, address, city, state, zip, phone, email, mileage_rate)
     VALUES (${company}, ${p.contact_name ?? null}, ${p.address ?? null}, ${p.city ?? null},
-            ${p.state ?? null}, ${p.zip ?? null}, ${p.phone ?? null}, ${p.mileage_rate ?? null})
-    RETURNING id, company, contact_name, address, city, state, zip, phone, mileage_rate;
+            ${p.state ?? null}, ${p.zip ?? null}, ${p.phone ?? null}, ${p.email ?? null},
+            ${p.mileage_rate ?? null})
+    RETURNING id, company, contact_name, address, city, state, zip, phone, email, mileage_rate;
   `;
   return rowToCustomer(r.rows[0]);
 }
@@ -517,6 +535,7 @@ export async function updateCustomer(
     state: string | null;
     zip: string | null;
     phone: string | null;
+    email: string | null;
     mileage_rate: number | null;
   },
 ): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -544,6 +563,7 @@ export async function updateCustomer(
       state = ${p.state},
       zip = ${p.zip},
       phone = ${p.phone},
+      email = ${p.email},
       -- The rate isn't edited anywhere anymore (MILES lines drive mileage now),
       -- but old rates stay put — they're still the fallback for old invoices
       -- that never had a MILES line.
@@ -557,6 +577,49 @@ export async function updateCustomer(
   return { ok: true };
 }
 
+// ---- email sending support -------------------------------------------------
+
+/** Remembers the address an invoice email was sent to, for next time. */
+export async function setCustomerEmail(customerId: number, email: string): Promise<void> {
+  await sql`UPDATE customers SET email = ${email.trim()} WHERE id = ${customerId};`;
+}
+
+export interface EmailLogRow {
+  id: number;
+  kind: string; // "invoice" | "reminder" | "thanks"
+  to_address: string;
+  subject: string;
+  sent_at: string; // ISO timestamp
+}
+
+export async function logEmail(entry: {
+  invoice_id: number;
+  kind: string;
+  to_address: string;
+  subject: string;
+}): Promise<void> {
+  await sql`
+    INSERT INTO email_log (invoice_id, kind, to_address, subject)
+    VALUES (${entry.invoice_id}, ${entry.kind}, ${entry.to_address}, ${entry.subject});
+  `;
+}
+
+export async function getEmailLog(invoiceId: number): Promise<EmailLogRow[]> {
+  await initSchema();
+  const r = await sql`
+    SELECT id, kind, to_address, subject, to_char(sent_at, 'YYYY-MM-DD"T"HH24:MI:SSZ') AS sent_at
+    FROM email_log WHERE invoice_id = ${invoiceId}
+    ORDER BY sent_at DESC, id DESC;
+  `;
+  return r.rows.map((row) => ({
+    id: Number(row.id),
+    kind: row.kind as string,
+    to_address: row.to_address as string,
+    subject: row.subject as string,
+    sent_at: row.sent_at as string,
+  }));
+}
+
 /** Finds a customer by company name (case-insensitive) or creates one. */
 export async function upsertCustomer(p: {
   company: string;
@@ -566,6 +629,7 @@ export async function upsertCustomer(p: {
   state?: string | null;
   zip?: string | null;
   phone?: string | null;
+  email?: string | null;
 }): Promise<number> {
   const company = p.company.trim();
   const existing = await sql`
@@ -581,15 +645,17 @@ export async function upsertCustomer(p: {
         city         = COALESCE(city,         ${p.city ?? null}),
         state        = COALESCE(state,        ${p.state ?? null}),
         zip          = COALESCE(zip,          ${p.zip ?? null}),
-        phone        = COALESCE(phone,        ${p.phone ?? null})
+        phone        = COALESCE(phone,        ${p.phone ?? null}),
+        email        = COALESCE(email,        ${p.email ?? null})
       WHERE id = ${id};
     `;
     return id;
   }
   const inserted = await sql`
-    INSERT INTO customers (company, contact_name, address, city, state, zip, phone)
+    INSERT INTO customers (company, contact_name, address, city, state, zip, phone, email)
     VALUES (${company}, ${p.contact_name ?? null}, ${p.address ?? null},
-            ${p.city ?? null}, ${p.state ?? null}, ${p.zip ?? null}, ${p.phone ?? null})
+            ${p.city ?? null}, ${p.state ?? null}, ${p.zip ?? null}, ${p.phone ?? null},
+            ${p.email ?? null})
     RETURNING id;
   `;
   return inserted.rows[0].id as number;
@@ -640,6 +706,7 @@ export async function saveInvoice(
       state: data.customer_state,
       zip: data.customer_zip,
       phone: data.customer_phone,
+      email: data.customer_email ?? null,
     });
   }
 

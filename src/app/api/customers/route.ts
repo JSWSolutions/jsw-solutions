@@ -46,6 +46,7 @@ export async function POST(req: Request) {
     state: str(body.state),
     zip: str(body.zip),
     phone: str(body.phone),
+    email: str(body.email),
     mileage_rate: mileageRate,
   });
   if (!customer) {

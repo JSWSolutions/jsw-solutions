@@ -94,6 +94,7 @@ export interface CustomerSummary {
   city: string | null;
   state: string | null;
   phone: string | null;
+  email: string | null;
   invoice_count: number;
   total_billed: number;
   last_service: string | null;
@@ -103,7 +104,7 @@ export async function getCustomers(search = ""): Promise<CustomerSummary[]> {
   await initSchema();
   const like = `%${search.trim()}%`;
   const r = await sql`
-    SELECT c.id, c.company, c.contact_name, c.city, c.state, c.phone,
+    SELECT c.id, c.company, c.contact_name, c.city, c.state, c.phone, c.email,
            COUNT(i.id) AS invoice_count,
            COALESCE(SUM(i.total), 0) AS total_billed,
            to_char(MAX(i.invoice_date), 'YYYY-MM-DD') AS last_service
@@ -120,6 +121,7 @@ export async function getCustomers(search = ""): Promise<CustomerSummary[]> {
     city: row.city as string | null,
     state: row.state as string | null,
     phone: row.phone as string | null,
+    email: (row.email as string) ?? null,
     invoice_count: num(row.invoice_count),
     total_billed: num(row.total_billed),
     last_service: row.last_service as string | null,

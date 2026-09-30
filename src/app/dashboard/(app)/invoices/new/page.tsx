@@ -14,6 +14,7 @@ type CustomerOpt = {
   state: string | null;
   zip: string | null;
   phone: string | null;
+  email: string | null;
 };
 type MachineOpt = { id: number; machine_id: string; customer_id: number | null };
 
@@ -73,6 +74,7 @@ type FormState = {
   customer_state: string;
   customer_zip: string;
   customer_phone: string;
+  customer_email: string;
   work_summary: string;
   notes: string;
   total: string;
@@ -88,6 +90,7 @@ const EMPTY: FormState = {
   customer_state: "",
   customer_zip: "",
   customer_phone: "",
+  customer_email: "",
   work_summary: "",
   notes: "",
   total: "",
@@ -145,6 +148,7 @@ function parsedToForm(p: ParsedInvoice): FormState {
     customer_state: p.customer_state ?? "",
     customer_zip: p.customer_zip ?? "",
     customer_phone: p.customer_phone ?? "",
+    customer_email: p.customer_email ?? "",
     work_summary: p.work_summary ?? "",
     notes: p.notes ?? "",
     total: p.total ? String(p.total) : "",
@@ -206,6 +210,7 @@ export default function NewInvoicePage() {
         customer_state: "",
         customer_zip: "",
         customer_phone: "",
+        customer_email: "",
         machine_id: "",
       }));
       return;
@@ -221,6 +226,7 @@ export default function NewInvoicePage() {
       customer_state: c.state ?? "",
       customer_zip: c.zip ?? "",
       customer_phone: c.phone ?? "",
+      customer_email: c.email ?? "",
       machine_id: "",
     }));
   }
@@ -652,6 +658,7 @@ export default function NewInvoicePage() {
           <Input label="Company name" value={form.customer_company} onChange={(v) => set("customer_company", v)} />
           <Input label="Contact name" value={form.customer_contact} onChange={(v) => set("customer_contact", v)} />
           <Input label="Phone" value={form.customer_phone} onChange={(v) => set("customer_phone", v)} />
+          <Input label="Email(s) for invoices — commas between several" value={form.customer_email} onChange={(v) => set("customer_email", v)} />
           <Input label="Address" value={form.customer_address} onChange={(v) => set("customer_address", v)} />
           <Input label="City" value={form.customer_city} onChange={(v) => set("customer_city", v)} />
           <div className="grid grid-cols-2 gap-3">

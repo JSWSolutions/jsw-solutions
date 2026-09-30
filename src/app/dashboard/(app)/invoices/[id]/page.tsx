@@ -2,9 +2,28 @@ import { unstable_noStore as noStore } from "next/cache";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getInvoiceById } from "@/lib/queries";
+import { getCustomerDetails, getEmailLog } from "@/lib/db";
 import { money, shortDate, invoiceDates } from "@/lib/format";
 import { MarkPaidButton } from "@/components/dashboard/MarkPaidButton";
 import { DeleteInvoiceButton } from "@/components/dashboard/DeleteInvoiceButton";
+import { EmailButtons } from "@/components/dashboard/EmailButtons";
+
+const EMAIL_KIND_LABEL: Record<string, string> = {
+  invoice: "Invoice sent",
+  thanks: "Payment received",
+};
+
+function whenSent(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -20,6 +39,10 @@ export default async function InvoiceDetailPage({
   if (!Number.isFinite(id)) notFound();
   const inv = await getInvoiceById(id);
   if (!inv) notFound();
+  const [customer, emails] = await Promise.all([
+    inv.customer_id != null ? getCustomerDetails(inv.customer_id) : Promise.resolve(null),
+    getEmailLog(inv.id),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -156,6 +179,37 @@ export default async function InvoiceDetailPage({
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+        <h2 className="mb-1 font-bold text-slate-900">Email the customer</h2>
+        <p className="mb-4 text-sm text-slate-500">
+          {customer?.email
+            ? `Saved addresses for ${customer.company}: ${customer.email}`
+            : "No email saved for this customer yet — you'll be asked for one (add it under Customers → Edit to set it ahead of time)."}
+        </p>
+        <EmailButtons
+          invoiceId={inv.id}
+          paid={inv.paid}
+          company={inv.customer_company}
+          savedEmail={customer?.email ?? null}
+          hasCustomer={inv.customer_id != null}
+        />
+        {emails.length > 0 && (
+          <div className="mt-5">
+            <h3 className="mb-2 text-sm font-semibold text-slate-700">Sent from this invoice</h3>
+            <ul className="space-y-1 text-sm text-slate-600">
+              {emails.map((e) => (
+                <li key={e.id}>
+                  <span className="font-medium text-slate-800">
+                    {EMAIL_KIND_LABEL[e.kind] ?? e.kind}
+                  </span>{" "}
+                  to {e.to_address} · {whenSent(e.sent_at)}
+                </li>
+              ))}
+            </ul>
           </div>
         )}
       </div>

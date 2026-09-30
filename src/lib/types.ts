@@ -9,7 +9,8 @@ export interface Customer {
   state: string | null;
   zip: string | null;
   phone: string | null;
-  mileage_rate: number | null; // miles per billed travel hour
+  email: string | null; // where invoice emails go
+  mileage_rate: number | null; // legacy fallback only; MILES lines drive mileage now
   created_at: string;
 }
 
@@ -71,6 +72,7 @@ export interface ParsedInvoice {
   customer_state: string | null;
   customer_zip: string | null;
   customer_phone: string | null;
+  customer_email?: string | null;
   work_summary: string | null;
   notes: string | null;
   line_items: LineItem[];

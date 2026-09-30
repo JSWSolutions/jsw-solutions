@@ -58,6 +58,7 @@ export async function PATCH(
     state: str(body.state),
     zip: str(body.zip),
     phone: str(body.phone),
+    email: str(body.email),
     mileage_rate: mileageRate,
   });
   if (!result.ok) {

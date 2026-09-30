@@ -12,6 +12,7 @@ export interface CustomerFormValues {
   state: string;
   zip: string;
   phone: string;
+  email: string;
 }
 
 const BLANK: CustomerFormValues = {
@@ -22,6 +23,7 @@ const BLANK: CustomerFormValues = {
   state: "",
   zip: "",
   phone: "",
+  email: "",
 };
 
 /**
@@ -60,6 +62,7 @@ export function CustomerForm({ initial }: { initial?: CustomerFormValues }) {
             state: v.state,
             zip: v.zip,
             phone: v.phone,
+            email: v.email,
           }),
         },
       );
@@ -93,6 +96,14 @@ export function CustomerForm({ initial }: { initial?: CustomerFormValues }) {
           <input className={input} value={v.phone} onChange={(e) => set("phone", e.target.value)} />
         </Field>
       </div>
+      <Field label="Email addresses — invoices and payment confirmations go here (separate several with commas)">
+        <input
+          className={input}
+          placeholder="ap@customer.com, buyer@customer.com"
+          value={v.email}
+          onChange={(e) => set("email", e.target.value)}
+        />
+      </Field>
       <Field label="Street address">
         <input className={input} value={v.address} onChange={(e) => set("address", e.target.value)} />
       </Field>

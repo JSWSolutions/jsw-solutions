@@ -46,6 +46,7 @@ export default async function CustomersPage({
             <tr>
               <th className="px-4 py-3">Company</th>
               <th className="px-4 py-3">Contact</th>
+              <th className="px-4 py-3">Email</th>
               <th className="px-4 py-3">Location</th>
               <th className="px-4 py-3 text-right">Jobs</th>
               <th className="px-4 py-3 text-right">Total billed</th>
@@ -56,7 +57,7 @@ export default async function CustomersPage({
           <tbody>
             {customers.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
+                <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
                   No customers yet.
                 </td>
               </tr>
@@ -72,6 +73,7 @@ export default async function CustomersPage({
                   </Link>
                 </td>
                 <td className="px-4 py-3">{c.contact_name || "—"}</td>
+                <td className="px-4 py-3 text-slate-600">{c.email || "—"}</td>
                 <td className="px-4 py-3 text-slate-500">
                   {[c.city, c.state].filter(Boolean).join(", ") || "—"}
                 </td>
