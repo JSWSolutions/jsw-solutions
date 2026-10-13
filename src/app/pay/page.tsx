@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { Logo } from "@/components/Logo";
+import { cardFee, cardTotal, CARD_FEE_PERCENT } from "@/lib/fees";
 
 type Match = {
   id: number;
@@ -91,6 +92,10 @@ export default function PayPage() {
         <p className="mt-2 text-ink/80">
           Enter the PO number and ZIP code from your invoice to pay by credit card.
         </p>
+        <p className="mt-1 text-sm text-ink/60">
+          A {CARD_FEE_PERCENT} credit card fee is added to card payments to cover the
+          processing cost. Checks have no fee.
+        </p>
 
         <div className="mt-8 rounded-xl border border-black/10 bg-white p-6 shadow-sm">
           <label className="block">
@@ -128,28 +133,40 @@ export default function PayPage() {
             {matches.map((m) => (
               <div
                 key={m.id}
-                className="flex items-center justify-between rounded-xl border border-black/10 bg-white p-5 shadow-sm"
+                className="rounded-xl border border-black/10 bg-white p-5 shadow-sm"
               >
-                <div>
-                  <p className="font-semibold text-ink">{m.company}</p>
-                  <p className="text-sm text-ink/70">
-                    {m.po_number ? `PO ${m.po_number}` : "No PO number"}
-                    {m.invoice_date ? ` · ${m.invoice_date}` : ""}
-                  </p>
-                  <p className="mt-1 text-lg font-bold text-brand-green-dark">{money(m.total)}</p>
-                </div>
+                <p className="font-semibold text-ink">{m.company}</p>
+                <p className="text-sm text-ink/70">
+                  {m.po_number ? `PO ${m.po_number}` : "No PO number"}
+                  {m.invoice_date ? ` · ${m.invoice_date}` : ""}
+                </p>
+                <dl className="mt-3 space-y-1 text-sm">
+                  <div className="flex justify-between">
+                    <dt className="text-ink/70">Invoice amount</dt>
+                    <dd className="font-medium">{money(m.total)}</dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt className="text-ink/70">Credit card fee ({CARD_FEE_PERCENT})</dt>
+                    <dd className="font-medium">{money(cardFee(m.total))}</dd>
+                  </div>
+                  <div className="flex justify-between border-t border-black/10 pt-2 text-base">
+                    <dt className="font-semibold">Total charged to card</dt>
+                    <dd className="font-bold text-brand-green-dark">{money(cardTotal(m.total))}</dd>
+                  </div>
+                </dl>
                 <button
                   onClick={() => pay(m.id)}
                   disabled={payingId !== null}
-                  className="rounded-lg bg-brand-green px-5 py-2.5 font-semibold text-white hover:bg-brand-green-dark disabled:opacity-50"
+                  className="mt-4 w-full rounded-lg bg-brand-green px-5 py-2.5 font-semibold text-white hover:bg-brand-green-dark disabled:opacity-50"
                 >
-                  {payingId === m.id ? "Redirecting…" : "Pay with Card"}
+                  {payingId === m.id ? "Redirecting…" : `Pay ${money(cardTotal(m.total))} with Card`}
                 </button>
               </div>
             ))}
             <p className="text-xs text-ink/60">
               You&apos;ll be redirected to Stripe, our secure payment processor, to complete your
-              card payment. JSW Solutions never sees or stores your card number.
+              card payment. The invoice amount and the card fee appear as separate lines on
+              your receipt. JSW Solutions never sees or stores your card number.
             </p>
           </div>
         )}
@@ -158,8 +175,8 @@ export default function PayPage() {
           Trouble finding your invoice? Email{" "}
           <a className="text-brand-green-dark underline" href="mailto:jsawsolutions@gmail.com">
             jsawsolutions@gmail.com
-          </a>{" "}
-          or call 734-320-6348.
+          </a>
+          .
         </p>
       </section>
     </div>

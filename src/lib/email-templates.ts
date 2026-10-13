@@ -1,18 +1,20 @@
 import type { InvoicePdfData } from "./invoice-pdf";
+import { CARD_FEE_PERCENT, PAY_URL } from "./fees";
 
 // ---------------------------------------------------------------------------
-// The two customer emails the dashboard sends from an invoice page, using
-// Marcel's wording. (Payment reminders are handled by hand, on purpose.)
+// The customer emails the dashboard sends from an invoice page, using
+// Marcel's wording.
 //
 // >>> Marcel: this is the file to edit when you want to change the wording. <<<
 // Each template returns a subject plus a plain-text and an HTML body. The
 // plain-text version shows in email apps that block HTML — keep both in sync.
 // ---------------------------------------------------------------------------
 
-export type EmailKind = "invoice" | "thanks";
+export type EmailKind = "invoice" | "reminder" | "thanks";
 
 export const EMAIL_KIND_LABEL: Record<EmailKind, string> = {
   invoice: "Send invoice",
+  reminder: "Payment reminder",
   thanks: "Payment received",
 };
 
@@ -72,6 +74,18 @@ function signatureText(): string {
   return `${SIGNATURE_NAME}\n${SIGNATURE_COMPANY}`;
 }
 
+/** The "you can pay by card" line, used by the invoice and reminder emails. */
+function payByCardText(): string {
+  return (
+    `You can also pay by credit card at ${PAY_URL} — just enter your PO number and ZIP code. ` +
+    `A ${CARD_FEE_PERCENT} credit card fee is added to card payments; checks have no fee.`
+  );
+}
+
+function payByCardHtml(): string {
+  return `<p>You can also pay by credit card at <a href="${PAY_URL}" style="color:#df6f1e;">${PAY_URL}</a> — just enter your PO number and ZIP code. A ${CARD_FEE_PERCENT} credit card fee is added to card payments; checks have no fee.</p>`;
+}
+
 // ---------------------------------------------------------------------------
 // 1. NEW INVOICE — the invoice PDF is attached
 // ---------------------------------------------------------------------------
@@ -83,6 +97,8 @@ export function invoiceEmail(d: InvoicePdfData): EmailContent {
   const text = [
     "Thank you for your business. Please see the attached invoice for your billing details.",
     "",
+    payByCardText(),
+    "",
     "If you have any questions about this invoice, please don't hesitate to reach out.",
     "",
     "Thank you!",
@@ -92,6 +108,7 @@ export function invoiceEmail(d: InvoicePdfData): EmailContent {
 
   const html = shell(`
     <p>Thank you for your business. Please see the attached invoice for your billing details.</p>
+    ${payByCardHtml()}
     <p>If you have any questions about this invoice, please don't hesitate to reach out.</p>
     <p>Thank you!</p>
   `);
@@ -100,7 +117,39 @@ export function invoiceEmail(d: InvoicePdfData): EmailContent {
 }
 
 // ---------------------------------------------------------------------------
-// 2. PAYMENT RECEIVED — sent after the invoice is marked paid (no attachment)
+// 2. PAYMENT REMINDER — the invoice PDF is attached again
+// ---------------------------------------------------------------------------
+export function reminderEmail(d: InvoicePdfData): EmailContent {
+  const invoiceNo = d.po_number ?? "";
+  const amount = money(d.total);
+  const subject = d.po_number
+    ? `Payment reminder — invoice ${d.po_number} — JSW Solutions`
+    : "Payment reminder — JSW Solutions";
+
+  const text = [
+    `This is a friendly reminder that invoice ${invoiceNo} in the amount of ${amount} is still outstanding. A copy is attached for your convenience.`,
+    "",
+    payByCardText(),
+    "",
+    "If payment has already been sent, please disregard this message — and thank you. If you have any questions about this invoice, please don't hesitate to reach out.",
+    "",
+    "Thank you!",
+    "",
+    signatureText(),
+  ].join("\n");
+
+  const html = shell(`
+    <p>This is a friendly reminder that invoice <b>${esc(invoiceNo)}</b> in the amount of <b>${esc(amount)}</b> is still outstanding. A copy is attached for your convenience.</p>
+    ${payByCardHtml()}
+    <p>If payment has already been sent, please disregard this message — and thank you. If you have any questions about this invoice, please don't hesitate to reach out.</p>
+    <p>Thank you!</p>
+  `);
+
+  return { subject, text, html };
+}
+
+// ---------------------------------------------------------------------------
+// 3. PAYMENT RECEIVED — sent after the invoice is marked paid (no attachment)
 // ---------------------------------------------------------------------------
 export function thanksEmail(d: InvoicePdfData): EmailContent {
   const subject = d.po_number
@@ -130,6 +179,8 @@ export function buildEmail(kind: EmailKind, d: InvoicePdfData): EmailContent {
   switch (kind) {
     case "invoice":
       return invoiceEmail(d);
+    case "reminder":
+      return reminderEmail(d);
     case "thanks":
       return thanksEmail(d);
   }
@@ -137,7 +188,7 @@ export function buildEmail(kind: EmailKind, d: InvoicePdfData): EmailContent {
 
 /** Which kinds carry the invoice PDF. */
 export function attachesPdf(kind: EmailKind): boolean {
-  return kind === "invoice";
+  return kind === "invoice" || kind === "reminder";
 }
 
 /**

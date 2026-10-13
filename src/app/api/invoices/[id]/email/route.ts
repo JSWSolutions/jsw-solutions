@@ -8,11 +8,11 @@ import { logEmail, setCustomerEmail } from "@/lib/db";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const KINDS: EmailKind[] = ["invoice", "thanks"];
+const KINDS: EmailKind[] = ["invoice", "reminder", "thanks"];
 
 /**
  * POST /api/invoices/123/email
- * body: { kind: "invoice" | "thanks", to: string, save_email: boolean }
+ * body: { kind: "invoice" | "reminder" | "thanks", to: string, save_email: boolean }
  *
  * `to` may hold several addresses separated by commas — most customers have
  * two or three people who need the invoice. Sends the chosen email (attaching
@@ -61,6 +61,12 @@ export async function POST(
   if (kind === "thanks" && !data.paid) {
     return NextResponse.json(
       { error: "This invoice isn't marked paid yet — mark it paid first, then send the thank-you." },
+      { status: 400 },
+    );
+  }
+  if (kind === "reminder" && data.paid) {
+    return NextResponse.json(
+      { error: "This invoice is already paid — no reminder needed." },
       { status: 400 },
     );
   }

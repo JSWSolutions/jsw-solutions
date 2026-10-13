@@ -7,6 +7,7 @@ import {
   rgb,
 } from "pdf-lib";
 import { LOGO_PNG_BASE64 } from "./logo-data";
+import { CARD_FEE_PERCENT } from "./fees";
 
 // ---------------------------------------------------------------------------
 // Recreates the JSW Solutions "Service Invoice" Word template as a PDF,
@@ -355,7 +356,8 @@ export async function buildInvoicePdf(
   // --- footer terms ----------------------------------------------------------
   y -= 12;
   const terms =
-    "Please make checks payable to JSW Solutions LLC. Payment required upon receipt. Minimum 4 hour service charge per day. Travel hours, per diem, and miles may be evenly split between multiple machines serviced on the same date.";
+    "Please make checks payable to JSW Solutions LLC. Payment required upon receipt. Minimum 4 hour service charge per day. Travel hours, per diem, and miles may be evenly split between multiple machines serviced on the same date. " +
+    `Credit card payments are accepted at www.jswsolutions.org/pay — a ${CARD_FEE_PERCENT} credit card fee is added to card payments.`;
   const termLines = wrapText(terms, italic, 7.5, CONTENT_W - 40);
   for (const ln of termLines) {
     centerText(ln, PAGE_W / 2, y, italic, 7.5, GRAY);

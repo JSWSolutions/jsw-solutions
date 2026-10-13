@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getPayableInvoice } from "@/lib/db";
 import { getStripe } from "@/lib/stripe";
+import { cardFee, CARD_FEE_PERCENT } from "@/lib/fees";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -8,8 +9,9 @@ export const dynamic = "force-dynamic";
 /**
  * Public endpoint behind the /pay page. Re-checks the PO + ZIP match on the
  * server (never trust a client-supplied invoice id alone) before creating a
- * Stripe Checkout session for the invoice's exact total, then hands back the
- * URL to redirect the customer's browser to.
+ * Stripe Checkout session for the invoice total PLUS the credit card fee
+ * (shown as its own line on the Stripe receipt), then hands back the URL to
+ * redirect the customer's browser to.
  */
 export async function POST(req: Request) {
   let body: Record<string, unknown>;
@@ -47,6 +49,7 @@ export async function POST(req: Request) {
   }
 
   const origin = new URL(req.url).origin;
+  const fee = cardFee(invoice.total);
   try {
     const stripe = getStripe();
     const session = await stripe.checkout.sessions.create({
@@ -64,8 +67,24 @@ export async function POST(req: Request) {
           },
           quantity: 1,
         },
+        {
+          price_data: {
+            currency: "usd",
+            unit_amount: Math.round(fee * 100),
+            product_data: {
+              name: `Credit card fee (${CARD_FEE_PERCENT})`,
+              description: "Covers the card processing cost",
+            },
+          },
+          quantity: 1,
+        },
       ],
-      metadata: { invoice_id: String(invoice.id), po_number: po },
+      metadata: {
+        invoice_id: String(invoice.id),
+        po_number: po,
+        invoice_total: invoice.total.toFixed(2),
+        card_fee: fee.toFixed(2),
+      },
       success_url: `${origin}/pay/success?invoice=${invoice.id}`,
       cancel_url: `${origin}/pay?canceled=1`,
     });

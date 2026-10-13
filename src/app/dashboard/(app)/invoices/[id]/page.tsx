@@ -10,6 +10,7 @@ import { EmailButtons } from "@/components/dashboard/EmailButtons";
 
 const EMAIL_KIND_LABEL: Record<string, string> = {
   invoice: "Invoice sent",
+  reminder: "Payment reminder",
   thanks: "Payment received",
 };
 

@@ -3,15 +3,17 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-type Kind = "invoice" | "thanks";
+type Kind = "invoice" | "reminder" | "thanks";
 
 const LABEL: Record<Kind, string> = {
   invoice: "Send invoice",
+  reminder: "Payment reminder",
   thanks: "Payment received",
 };
 
 const BLURB: Record<Kind, string> = {
-  invoice: "Emails the invoice with the PDF attached.",
+  invoice: "Emails the invoice with the PDF attached, plus how to pay by card.",
+  reminder: "A friendly nudge that the invoice is still open, PDF attached.",
   thanks: "Confirms their payment was received (date, PO, amount). No attachment.",
 };
 
@@ -101,9 +103,14 @@ export function EmailButtons({
     <div className="space-y-2">
       <div className="flex flex-wrap gap-2">
         {!paid ? (
-          <button onClick={() => open("invoice")} className={btn}>
-            ✉ Send invoice
-          </button>
+          <>
+            <button onClick={() => open("invoice")} className={btn}>
+              ✉ Send invoice
+            </button>
+            <button onClick={() => open("reminder")} className={btn}>
+              ✉ Payment reminder
+            </button>
+          </>
         ) : (
           <button onClick={() => open("thanks")} className={btn}>
             ✉ Payment received
