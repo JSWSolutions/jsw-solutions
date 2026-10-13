@@ -47,8 +47,15 @@ function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-/** Wraps the body paragraphs in a simple branded HTML shell. */
-function shell(paragraphsHtml: string): string {
+const AUTOMATED_NOTE =
+  "This is an automated message sent from the JSW Solutions billing system. Replies are read — they go straight to jsawsolutions@gmail.com.";
+
+/**
+ * Wraps the body paragraphs in a simple branded HTML shell. `footnoteHtml`
+ * is optional small print placed after the signature — for things worth
+ * mentioning but not leading with.
+ */
+function shell(paragraphsHtml: string, footnoteHtml = ""): string {
   return `<!doctype html>
 <html><body style="margin:0;padding:0;background:#f4f1e8;font-family:Arial,Helvetica,sans-serif;color:#1c1c1c;">
   <div style="max-width:600px;margin:0 auto;padding:24px 16px;">
@@ -62,9 +69,11 @@ function shell(paragraphsHtml: string): string {
         ${esc(SIGNATURE_NAME)}<br>
         <span style="color:#555;">${esc(SIGNATURE_COMPANY)}</span>
       </p>
+      ${footnoteHtml ? `<p style="margin:18px 0 0;padding-top:12px;border-top:1px solid #eee;font-size:12px;color:#777;">${footnoteHtml}</p>` : ""}
     </div>
     <p style="font-size:11px;color:#888;text-align:center;margin-top:14px;">
-      JSW Solutions LLC &middot; 1151 Bishop Rd, Saline, MI 48176
+      JSW Solutions LLC &middot; 1151 Bishop Rd, Saline, MI 48176<br>
+      ${esc(AUTOMATED_NOTE)}
     </p>
   </div>
 </body></html>`;
@@ -74,7 +83,30 @@ function signatureText(): string {
   return `${SIGNATURE_NAME}\n${SIGNATURE_COMPANY}`;
 }
 
-/** The "you can pay by card" line, used by the invoice and reminder emails. */
+/** Trailing lines for the plain-text version: optional footnote, then the automated notice. */
+function textTail(footnote = ""): string {
+  const parts: string[] = [""];
+  if (footnote) parts.push("", footnote);
+  parts.push("", "--", AUTOMATED_NOTE);
+  return parts.join("\n");
+}
+
+/** Low-key end note for the invoice email — checks are the preferred method. */
+function cardFootnoteText(): string {
+  return (
+    `Payment by check is preferred. If paying by card is easier for your team, it's available at ${PAY_URL} ` +
+    `(enter your PO number and ZIP code; a ${CARD_FEE_PERCENT} credit card fee applies).`
+  );
+}
+
+function cardFootnoteHtml(): string {
+  return (
+    `Payment by check is preferred. If paying by card is easier for your team, it's available at ` +
+    `<a href="${PAY_URL}" style="color:#777;">${PAY_URL}</a> (enter your PO number and ZIP code; a ${CARD_FEE_PERCENT} credit card fee applies).`
+  );
+}
+
+/** The "you can pay by card" line, used by the reminder email. */
 function payByCardText(): string {
   return (
     `You can also pay by credit card at ${PAY_URL} — just enter your PO number and ZIP code. ` +
@@ -94,24 +126,25 @@ export function invoiceEmail(d: InvoicePdfData): EmailContent {
     ? `Invoice from JSW Solutions — PO ${d.po_number}`
     : "Invoice from JSW Solutions";
 
-  const text = [
-    "Thank you for your business. Please see the attached invoice for your billing details.",
-    "",
-    payByCardText(),
-    "",
-    "If you have any questions about this invoice, please don't hesitate to reach out.",
-    "",
-    "Thank you!",
-    "",
-    signatureText(),
-  ].join("\n");
+  const text =
+    [
+      "Thank you for your business. Please see the attached invoice for your billing details.",
+      "",
+      "If you have any questions about this invoice, please don't hesitate to reach out.",
+      "",
+      "Thank you!",
+      "",
+      signatureText(),
+    ].join("\n") + textTail(cardFootnoteText());
 
-  const html = shell(`
+  const html = shell(
+    `
     <p>Thank you for your business. Please see the attached invoice for your billing details.</p>
-    ${payByCardHtml()}
     <p>If you have any questions about this invoice, please don't hesitate to reach out.</p>
     <p>Thank you!</p>
-  `);
+  `,
+    cardFootnoteHtml(),
+  );
 
   return { subject, text, html };
 }
@@ -136,7 +169,7 @@ export function reminderEmail(d: InvoicePdfData): EmailContent {
     "Thank you!",
     "",
     signatureText(),
-  ].join("\n");
+  ].join("\n") + textTail();
 
   const html = shell(`
     <p>This is a friendly reminder that invoice <b>${esc(invoiceNo)}</b> in the amount of <b>${esc(amount)}</b> is still outstanding. A copy is attached for your convenience.</p>
@@ -165,7 +198,7 @@ export function thanksEmail(d: InvoicePdfData): EmailContent {
     "We appreciate your prompt payment. Thank you for your business!",
     "",
     signatureText(),
-  ].join("\n");
+  ].join("\n") + textTail();
 
   const html = shell(`
     <p>Thank you for your payment received on <b>${esc(date)}</b>. We've confirmed receipt of your payment for invoice <b>${esc(invoiceNo)}</b> in the amount of <b>${esc(amount)}</b>.</p>
