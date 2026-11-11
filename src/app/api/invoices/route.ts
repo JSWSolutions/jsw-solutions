@@ -8,7 +8,14 @@ export const runtime = "nodejs";
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const q = searchParams.get("q") ?? "";
-  const invoices = await getInvoices({ search: q, limit: 500 });
+  const customer = Number(searchParams.get("customer"));
+  const unpaid = searchParams.get("unpaid") === "1";
+  const invoices = await getInvoices({
+    search: q,
+    customerId: Number.isFinite(customer) && customer > 0 ? customer : undefined,
+    paid: unpaid ? false : undefined,
+    limit: 500,
+  });
   return NextResponse.json({ invoices });
 }
 

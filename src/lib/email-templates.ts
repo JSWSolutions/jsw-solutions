@@ -208,6 +208,109 @@ export function thanksEmail(d: InvoicePdfData): EmailContent {
   return { subject, text, html };
 }
 
+// ---------------------------------------------------------------------------
+// BUNDLES — several invoices for the same customer in one email. The body
+// lists each invoice and the combined total; every PDF rides along.
+// ---------------------------------------------------------------------------
+function invoiceLineText(d: InvoicePdfData): string {
+  const when = d.dates.length ? ` (${d.dates.length > 1 ? `${usShort(d.dates[0])} – ${usShort(d.dates[d.dates.length - 1])}` : usShort(d.dates[0])})` : "";
+  return `  • Invoice ${d.po_number ?? "—"}${when} — ${money(d.total)}`;
+}
+
+function invoiceLineHtml(d: InvoicePdfData): string {
+  const when = d.dates.length ? ` <span style="color:#777;">(${esc(d.dates.length > 1 ? `${usShort(d.dates[0])} – ${usShort(d.dates[d.dates.length - 1])}` : usShort(d.dates[0]))})</span>` : "";
+  return `<li>Invoice <b>${esc(d.po_number ?? "—")}</b>${when} — ${esc(money(d.total))}</li>`;
+}
+
+/** "2026-11-02" → "11/2/2026" */
+function usShort(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  return m ? `${Number(m[2])}/${Number(m[3])}/${m[1]}` : iso;
+}
+
+function bundleTotal(list: InvoicePdfData[]): number {
+  return Math.round(list.reduce((s, d) => s + d.total, 0) * 100) / 100;
+}
+
+function poList(list: InvoicePdfData[]): string {
+  return list.map((d) => d.po_number).filter(Boolean).join(", ");
+}
+
+export function invoiceBundleEmail(list: InvoicePdfData[]): EmailContent {
+  const n = list.length;
+  const subject = `${n} invoices from JSW Solutions — ${poList(list)}`;
+  const total = money(bundleTotal(list));
+
+  const text =
+    [
+      `Thank you for your business. Please see the ${n} attached invoices for your billing details:`,
+      "",
+      ...list.map(invoiceLineText),
+      "",
+      `Total for these invoices: ${total}`,
+      "",
+      "If you have any questions about these invoices, please don't hesitate to reach out.",
+      "",
+      "Thank you!",
+      "",
+      signatureText(),
+    ].join("\n") + textTail(cardFootnoteText());
+
+  const html = shell(
+    `
+    <p>Thank you for your business. Please see the ${n} attached invoices for your billing details:</p>
+    <ul style="margin:0 0 0 18px;padding:0;">${list.map(invoiceLineHtml).join("")}</ul>
+    <p>Total for these invoices: <b>${esc(total)}</b></p>
+    <p>If you have any questions about these invoices, please don't hesitate to reach out.</p>
+    <p>Thank you!</p>
+  `,
+    cardFootnoteHtml(),
+  );
+  return { subject, text, html };
+}
+
+export function reminderBundleEmail(list: InvoicePdfData[]): EmailContent {
+  const n = list.length;
+  const subject = `Payment reminder — ${n} invoices — JSW Solutions`;
+  const total = money(bundleTotal(list));
+
+  const text =
+    [
+      `This is a friendly reminder that the following ${n} invoices are still outstanding. Copies are attached for your convenience.`,
+      "",
+      ...list.map(invoiceLineText),
+      "",
+      `Total outstanding: ${total}`,
+      "",
+      payByCardText(),
+      "",
+      "If payment has already been sent, please disregard this message — and thank you. If you have any questions about these invoices, please don't hesitate to reach out.",
+      "",
+      "Thank you!",
+      "",
+      signatureText(),
+    ].join("\n") + textTail();
+
+  const html = shell(`
+    <p>This is a friendly reminder that the following ${n} invoices are still outstanding. Copies are attached for your convenience.</p>
+    <ul style="margin:0 0 0 18px;padding:0;">${list.map(invoiceLineHtml).join("")}</ul>
+    <p>Total outstanding: <b>${esc(total)}</b></p>
+    ${payByCardHtml()}
+    <p>If payment has already been sent, please disregard this message — and thank you. If you have any questions about these invoices, please don't hesitate to reach out.</p>
+    <p>Thank you!</p>
+  `);
+  return { subject, text, html };
+}
+
+/**
+ * One invoice → the normal single email. Several → the bundle version.
+ * (Payment-received is always per invoice.)
+ */
+export function buildEmailFor(kind: EmailKind, list: InvoicePdfData[]): EmailContent {
+  if (list.length === 1 || kind === "thanks") return buildEmail(kind, list[0]);
+  return kind === "invoice" ? invoiceBundleEmail(list) : reminderBundleEmail(list);
+}
+
 export function buildEmail(kind: EmailKind, d: InvoicePdfData): EmailContent {
   switch (kind) {
     case "invoice":

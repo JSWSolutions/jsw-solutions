@@ -1,23 +1,30 @@
 import { NextResponse } from "next/server";
 import { getInvoiceForPdf, getInvoiceById } from "@/lib/queries";
 import { buildInvoicePdf, invoicePdfFilename } from "@/lib/invoice-pdf";
-import { buildEmail, attachesPdf, splitAddresses, type EmailKind } from "@/lib/email-templates";
+import { buildEmailFor, attachesPdf, splitAddresses, type EmailKind } from "@/lib/email-templates";
 import { sendMail, looksLikeEmail } from "@/lib/mailer";
 import { logEmail, setCustomerEmail } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 60; // several PDFs + an SMTP round-trip
 
 const KINDS: EmailKind[] = ["invoice", "reminder", "thanks"];
+const MAX_BUNDLE = 10;
 
 /**
  * POST /api/invoices/123/email
- * body: { kind: "invoice" | "reminder" | "thanks", to: string, save_email: boolean }
+ * body: {
+ *   kind: "invoice" | "reminder" | "thanks",
+ *   to: string,                 // one or more addresses, comma-separated
+ *   save_email: boolean,
+ *   also: number[]              // optional: other invoice ids to bundle in
+ * }
  *
- * `to` may hold several addresses separated by commas — most customers have
- * two or three people who need the invoice. Sends the chosen email (attaching
- * the invoice PDF for the invoice kind), logs it on the invoice, and optionally
- * saves the address list to the customer for next time.
+ * Invoice 123 is always included. With `also`, the invoice and reminder kinds
+ * become ONE email listing every invoice, with every PDF attached. All bundled
+ * invoices must belong to the same customer and be unpaid. Each invoice gets
+ * its own line in the send history.
  */
 export async function POST(
   req: Request,
@@ -52,34 +59,71 @@ export async function POST(
   }
   const toList = recipients.join(", ");
 
-  const [data, inv] = await Promise.all([getInvoiceForPdf(id), getInvoiceById(id)]);
-  if (!data || !inv) {
-    return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+  // The set of invoices going out: this one first, then any extras.
+  const extra = Array.isArray(body.also)
+    ? Array.from(new Set((body.also as unknown[]).map(Number).filter((n) => Number.isFinite(n) && n !== id)))
+    : [];
+  if (kind === "thanks" && extra.length) {
+    return NextResponse.json(
+      { error: "Payment-received emails go out one invoice at a time." },
+      { status: 400 },
+    );
+  }
+  const ids = [id, ...extra];
+  if (ids.length > MAX_BUNDLE) {
+    return NextResponse.json(
+      { error: `You can bundle up to ${MAX_BUNDLE} invoices in one email.` },
+      { status: 400 },
+    );
   }
 
-  // Guard against the wrong button for the invoice's state.
-  if (kind === "thanks" && !data.paid) {
+  const loaded = await Promise.all(
+    ids.map(async (invId) => ({
+      id: invId,
+      data: await getInvoiceForPdf(invId),
+      inv: await getInvoiceById(invId),
+    })),
+  );
+  const missing = loaded.find((x) => !x.data || !x.inv);
+  if (missing) {
+    return NextResponse.json({ error: `Invoice #${missing.id} not found.` }, { status: 404 });
+  }
+  const list = loaded.map((x) => x.data!);
+  const invs = loaded.map((x) => x.inv!);
+
+  // Guards: right button for the state, and bundles stay within one customer.
+  if (kind === "thanks" && !list[0].paid) {
     return NextResponse.json(
       { error: "This invoice isn't marked paid yet — mark it paid first, then send the thank-you." },
       { status: 400 },
     );
   }
-  if (kind === "reminder" && data.paid) {
+  if (kind !== "thanks") {
+    const paidOne = list.find((d) => d.paid);
+    if (paidOne) {
+      return NextResponse.json(
+        { error: `Invoice ${paidOne.po_number ?? ""} is already paid — take it out of the bundle.` },
+        { status: 400 },
+      );
+    }
+  }
+  const customerIds = new Set(invs.map((i) => i.customer_id));
+  if (customerIds.size > 1) {
     return NextResponse.json(
-      { error: "This invoice is already paid — no reminder needed." },
+      { error: "All invoices in one email must belong to the same customer." },
       { status: 400 },
     );
   }
 
-  const content = buildEmail(kind, data);
+  const content = buildEmailFor(kind, list);
   const attachments = attachesPdf(kind)
-    ? [
-        {
-          filename: invoicePdfFilename(data, false),
-          content: Buffer.from(await buildInvoicePdf(data, { paidStamp: false })),
+    ? await Promise.all(
+        list.map(async (d) => ({
+          filename: invoicePdfFilename(d, false),
+          content: Buffer.from(await buildInvoicePdf(d, { paidStamp: false })),
           contentType: "application/pdf",
-        },
-      ]
+        })),
+      )
     : undefined;
 
   try {
@@ -90,10 +134,15 @@ export async function POST(
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 
-  await logEmail({ invoice_id: id, kind, to_address: toList, subject: content.subject });
-  if (body.save_email === true && inv.customer_id != null) {
-    await setCustomerEmail(inv.customer_id, toList);
+  // One history line per invoice, so each page shows what went out.
+  const note = list.length > 1 ? ` (bundle of ${list.length})` : "";
+  for (const invId of ids) {
+    await logEmail({ invoice_id: invId, kind, to_address: toList, subject: content.subject + note });
+  }
+  const customerId = invs[0].customer_id;
+  if (body.save_email === true && customerId != null) {
+    await setCustomerEmail(customerId, toList);
   }
 
-  return NextResponse.json({ ok: true, subject: content.subject });
+  return NextResponse.json({ ok: true, subject: content.subject, count: list.length });
 }

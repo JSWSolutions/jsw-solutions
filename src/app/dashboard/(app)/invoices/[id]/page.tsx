@@ -195,6 +195,7 @@ export default async function InvoiceDetailPage({
           invoiceId={inv.id}
           paid={inv.paid}
           company={inv.customer_company}
+          customerId={inv.customer_id}
           savedEmail={customer?.email ?? null}
           hasCustomer={inv.customer_id != null}
         />

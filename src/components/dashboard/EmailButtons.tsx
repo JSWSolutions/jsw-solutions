@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 type Kind = "invoice" | "reminder" | "thanks";
 
@@ -28,16 +28,29 @@ function splitAddresses(raw: string): string[] {
  * list and every address gets the email. A changed list can be saved to the
  * customer for next time.
  */
+type OpenInvoice = {
+  id: number;
+  po_number: string | null;
+  invoice_date: string | null;
+  total: number;
+};
+
+function money(n: number): string {
+  return n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+}
+
 export function EmailButtons({
   invoiceId,
   paid,
   company,
+  customerId,
   savedEmail,
   hasCustomer,
 }: {
   invoiceId: number;
   paid: boolean;
   company: string | null;
+  customerId: number | null;
   savedEmail: string | null;
   hasCustomer: boolean;
 }) {
@@ -48,13 +61,33 @@ export function EmailButtons({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState("");
+  // Other unpaid invoices for the same customer, offered for bundling.
+  const [others, setOthers] = useState<OpenInvoice[]>([]);
+  const [also, setAlso] = useState<number[]>([]);
+
+  useEffect(() => {
+    if (!customerId || paid) return;
+    fetch(`/api/invoices?customer=${customerId}&unpaid=1`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) =>
+        setOthers(
+          ((j.invoices ?? []) as OpenInvoice[]).filter((i) => i.id !== invoiceId),
+        ),
+      )
+      .catch(() => {});
+  }, [customerId, invoiceId, paid]);
 
   function open(k: Kind) {
     setKind(k);
     setTo(savedEmail ?? "");
     setSave(!savedEmail);
+    setAlso([]);
     setError("");
     setDone("");
+  }
+
+  function toggleAlso(id: number) {
+    setAlso((arr) => (arr.includes(id) ? arr.filter((x) => x !== id) : [...arr, id]));
   }
 
   const recipients = splitAddresses(to);
@@ -77,7 +110,12 @@ export function EmailButtons({
       const res = await fetch(`/api/invoices/${invoiceId}/email`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind, to: recipients.join(", "), save_email: save && hasCustomer }),
+        body: JSON.stringify({
+          kind,
+          to: recipients.join(", "),
+          save_email: save && hasCustomer,
+          also: kind === "thanks" ? [] : also,
+        }),
       });
       const j = await res.json();
       if (!res.ok) {
@@ -86,7 +124,7 @@ export function EmailButtons({
         return;
       }
       setDone(
-        `Sent "${j.subject}" to ${recipients.length} ${recipients.length === 1 ? "address" : "addresses"}.`,
+        `Sent "${j.subject}"${j.count > 1 ? ` (${j.count} invoices attached)` : ""} to ${recipients.length} ${recipients.length === 1 ? "address" : "addresses"}.`,
       );
       setKind(null);
       router.refresh();
@@ -159,6 +197,40 @@ export function EmailButtons({
                   </li>
                 ))}
               </ul>
+            )}
+
+            {kind !== "thanks" && others.length > 0 && (
+              <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <p className="text-sm font-medium text-slate-700">
+                  Also include other open invoices for {company ?? "this customer"}?
+                </p>
+                <p className="mb-2 text-xs text-slate-500">
+                  Everything ticked goes out as one email, each invoice attached as its own PDF.
+                </p>
+                <ul className="space-y-1.5">
+                  {others.map((o) => (
+                    <li key={o.id}>
+                      <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={also.includes(o.id)}
+                          onChange={() => toggleAlso(o.id)}
+                          className="h-4 w-4 rounded border-slate-300"
+                        />
+                        <span className="font-medium">PO {o.po_number ?? "—"}</span>
+                        <span className="text-slate-500">
+                          {o.invoice_date ?? ""} · {money(o.total)}
+                        </span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+                {also.length > 0 && (
+                  <p className="mt-2 text-xs font-medium text-brand-green-dark">
+                    {also.length + 1} invoices will be sent together.
+                  </p>
+                )}
+              </div>
             )}
 
             {!savedEmail && (

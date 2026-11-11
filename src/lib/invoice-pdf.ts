@@ -101,7 +101,7 @@ export async function buildInvoicePdf(
   const showPaid = Boolean(opts.paidStamp && data.paid);
 
   const doc = await PDFDocument.create();
-  const page = doc.addPage([PAGE_W, PAGE_H]);
+  let page = doc.addPage([PAGE_W, PAGE_H]);
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
   const italic = await doc.embedFont(StandardFonts.HelveticaOblique);
@@ -111,6 +111,50 @@ export async function buildInvoicePdf(
 
   // --- helpers ---------------------------------------------------------------
   let y = PAGE_H - 40; // cursor from the top
+  const BOTTOM = 46; // nothing is drawn below this line
+  let pageNo = 1;
+
+  function paidWatermark() {
+    if (!showPaid) return;
+    page.drawText("PAID", {
+      x: 150,
+      y: 260,
+      size: 160,
+      font: bold,
+      color: GREEN,
+      opacity: 0.08,
+      rotate: degrees(35),
+    });
+  }
+
+  /**
+   * Long invoices continue on a fresh sheet with a slim header, so nothing is
+   * ever cut off at the bottom of the page.
+   */
+  function newPage() {
+    paidWatermark(); // stamp the page we're leaving
+    page = doc.addPage([PAGE_W, PAGE_H]);
+    pageNo += 1;
+    y = PAGE_H - 40;
+    const label = `SERVICE INVOICE${data.po_number ? ` — PO ${data.po_number}` : ""} (continued, page ${pageNo})`;
+    page.drawText(label, { x: MARGIN, y: y - 8, font: bold, size: 10, color: GREEN_DARK });
+    if (data.customer_company) {
+      const w = font.widthOfTextAtSize(data.customer_company, 9);
+      page.drawText(data.customer_company, { x: MARGIN + CONTENT_W - w, y: y - 8, font, size: 9, color: GRAY });
+    }
+    page.drawLine({
+      start: { x: MARGIN, y: y - 16 },
+      end: { x: MARGIN + CONTENT_W, y: y - 16 },
+      thickness: 2,
+      color: GREEN_DARK,
+    });
+    y -= 34;
+  }
+
+  /** Starts a new page if `h` points won't fit above the bottom margin. */
+  function ensure(h: number) {
+    if (y - h < BOTTOM) newPage();
+  }
 
   function text(
     s: string,
@@ -148,6 +192,7 @@ export async function buildInvoicePdf(
 
   /** A "label | value" row like the template's PO # / Machine / Date rows. */
   function labelRow(label: string, value: string, labelW: number, rowH = 19) {
+    ensure(rowH);
     cell(MARGIN, y, labelW, rowH, SAND);
     cell(MARGIN + labelW, y, CONTENT_W - labelW, rowH, null);
     text(label, MARGIN + 6, y - rowH + 6, bold, 8.5, INK);
@@ -157,6 +202,7 @@ export async function buildInvoicePdf(
 
   /** Green section heading with the thin gold underline. */
   function sectionHeading(label: string) {
+    ensure(14 + 10 + 24); // heading plus at least one line of whatever follows
     y -= 14;
     text(label, MARGIN + 4, y, bold, 10, GREEN);
     page.drawLine({
@@ -166,6 +212,42 @@ export async function buildInvoicePdf(
       color: GOLD,
     });
     y -= 10;
+  }
+
+  /**
+   * A bordered text box. When the text is longer than the space left on the
+   * page, the box is drawn in pieces — the rest continues on the next page.
+   */
+  function textBox(content: string) {
+    const LINE = 11;
+    const PAD = 12;
+    const lines = content.trim() ? wrapText(content.trim(), font, 8.5, CONTENT_W - 14) : [];
+    if (lines.length === 0) {
+      ensure(24);
+      cell(MARGIN, y, CONTENT_W, 24, null);
+      y -= 24;
+      return;
+    }
+    let i = 0;
+    while (i < lines.length) {
+      let fit = Math.floor((y - BOTTOM - PAD) / LINE);
+      if (fit < 3 && i < lines.length) {
+        // Not worth starting a sliver of a box here — move to a fresh page.
+        newPage();
+        fit = Math.floor((y - BOTTOM - PAD) / LINE);
+      }
+      const chunk = lines.slice(i, i + Math.max(1, fit));
+      const boxH = chunk.length * LINE + PAD;
+      cell(MARGIN, y, CONTENT_W, boxH, null);
+      chunk.forEach((ln, k) => text(ln, MARGIN + 7, y - 15 - k * LINE, font, 8.5, INK));
+      y -= boxH;
+      i += chunk.length;
+      if (i < lines.length) {
+        newPage();
+        text("(continued)", MARGIN + 4, y, italic, 8, GRAY);
+        y -= 12;
+      }
+    }
   }
 
   // --- header ----------------------------------------------------------------
@@ -253,28 +335,13 @@ export async function buildInvoicePdf(
 
   // --- SUMMARY OF WORK PERFORMED --------------------------------------------
   sectionHeading("SUMMARY OF WORK PERFORMED");
-  {
-    const summary = (data.work_summary ?? "").trim();
-    const lines = summary ? wrapText(summary, font, 8.5, CONTENT_W - 14) : [];
-    const boxH = Math.max(24, lines.length * 11 + 12);
-    cell(MARGIN, y, CONTENT_W, boxH, null);
-    lines.forEach((ln, i) => text(ln, MARGIN + 7, y - 15 - i * 11, font, 8.5, INK));
-    y -= boxH;
-  }
+  textBox(data.work_summary ?? "");
 
   // --- NOTES -----------------------------------------------------------------
   sectionHeading("NOTES");
-  {
-    const notes = (data.notes ?? "").trim();
-    const lines = notes ? wrapText(notes, font, 8.5, CONTENT_W - 14) : [];
-    const boxH = Math.max(24, lines.length * 11 + 12);
-    cell(MARGIN, y, CONTENT_W, boxH, null);
-    lines.forEach((ln, i) => text(ln, MARGIN + 7, y - 15 - i * 11, font, 8.5, INK));
-    y -= boxH;
-  }
+  textBox(data.notes ?? "");
 
   // --- LABOR INCLUDED --------------------------------------------------------
-  sectionHeading("LABOR INCLUDED");
   const cDesc = CONTENT_W * 0.24;
   const cRate = CONTENT_W * 0.25;
   const cQty = CONTENT_W * 0.25;
@@ -284,8 +351,7 @@ export async function buildInvoicePdf(
   const xQty = xRate + cRate;
   const xTotal = xQty + cQty;
 
-  {
-    // header row
+  function tableHeader() {
     const rowH = 20;
     page.drawRectangle({
       x: MARGIN,
@@ -302,6 +368,19 @@ export async function buildInvoicePdf(
     rightText("Total", xTotal + cTotal - 6, y - rowH + 6, bold, 9, WHITE);
     y -= rowH;
   }
+  // Keep a normal-sized table together with its total and terms; only a very
+  // long list of line items is allowed to break across pages.
+  {
+    const termsPreview = wrapText(
+      "Please make checks payable to JSW Solutions LLC. Payment required upon receipt. Minimum 4 hour service charge per day. Travel hours, per diem, and miles may be evenly split between multiple machines serviced on the same date. Credit card payments are accepted at www.jswsolutions.org/pay — a 3% credit card fee is added to card payments.",
+      italic, 7.5, CONTENT_W - 40,
+    ).length;
+    const rowCount = Math.max(4, data.line_items.length);
+    const whole = 24 + 20 + rowCount * 19 + 22 + 12 + termsPreview * 10; // heading included
+    if (rowCount <= 10 && y - whole < BOTTOM) newPage();
+  }
+  sectionHeading("LABOR INCLUDED");
+  tableHeader();
 
   // The template always shows its four standard rows; real line items replace
   // matching rows and anything extra is appended.
@@ -322,6 +401,10 @@ export async function buildInvoicePdf(
 
   for (const r of rows) {
     const rowH = 19;
+    if (y - rowH < BOTTOM) {
+      newPage();
+      tableHeader();
+    }
     cell(xDesc, y, cDesc, rowH, null);
     cell(xRate, y, cRate, rowH, null);
     cell(xQty, y, cQty, rowH, null);
@@ -335,6 +418,17 @@ export async function buildInvoicePdf(
     y -= rowH;
   }
 
+  const terms =
+    "Please make checks payable to JSW Solutions LLC. Payment required upon receipt. Minimum 4 hour service charge per day. Travel hours, per diem, and miles may be evenly split between multiple machines serviced on the same date. " +
+    `Credit card payments are accepted at www.jswsolutions.org/pay — a ${CARD_FEE_PERCENT} credit card fee is added to card payments.`;
+  const termLines = wrapText(terms, italic, 7.5, CONTENT_W - 40);
+
+  // The total and the terms travel together — never let the total land on
+  // one page and the terms on the next, and never let either get cut off.
+  if (y - (22 + 12 + termLines.length * 10) < BOTTOM) {
+    newPage();
+    tableHeader();
+  }
   {
     // Total Charge row — green label cell, amount in the rate column.
     const rowH = 22;
@@ -355,27 +449,13 @@ export async function buildInvoicePdf(
 
   // --- footer terms ----------------------------------------------------------
   y -= 12;
-  const terms =
-    "Please make checks payable to JSW Solutions LLC. Payment required upon receipt. Minimum 4 hour service charge per day. Travel hours, per diem, and miles may be evenly split between multiple machines serviced on the same date. " +
-    `Credit card payments are accepted at www.jswsolutions.org/pay — a ${CARD_FEE_PERCENT} credit card fee is added to card payments.`;
-  const termLines = wrapText(terms, italic, 7.5, CONTENT_W - 40);
   for (const ln of termLines) {
     centerText(ln, PAGE_W / 2, y, italic, 7.5, GRAY);
     y -= 10;
   }
 
-  // --- PAID watermark --------------------------------------------------------
-  if (showPaid) {
-    page.drawText("PAID", {
-      x: 150,
-      y: 260,
-      size: 160,
-      font: bold,
-      color: GREEN,
-      opacity: 0.08,
-      rotate: degrees(35),
-    });
-  }
+  // --- PAID watermark on the final page ---------------------------------------
+  paidWatermark();
 
   return doc.save();
 }
