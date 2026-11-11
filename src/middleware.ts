@@ -9,6 +9,7 @@ const PROTECTED_API = [
   "/api/mileage-rate",
   "/api/customers",
   "/api/machines",
+  "/api/quotes",
 ];
 
 export const config = {

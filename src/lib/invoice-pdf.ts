@@ -96,9 +96,11 @@ function wrapText(text: string, font: PDFFont, size: number, maxWidth: number): 
 
 export async function buildInvoicePdf(
   data: InvoicePdfData,
-  opts: { paidStamp?: boolean } = {},
+  opts: { paidStamp?: boolean; kind?: "invoice" | "quote" } = {},
 ): Promise<Uint8Array> {
-  const showPaid = Boolean(opts.paidStamp && data.paid);
+  const isQuote = opts.kind === "quote";
+  const showPaid = Boolean(!isQuote && opts.paidStamp && data.paid);
+  const TITLE = isQuote ? "QUOTE" : "SERVICE INVOICE";
 
   const doc = await PDFDocument.create();
   let page = doc.addPage([PAGE_W, PAGE_H]);
@@ -136,7 +138,7 @@ export async function buildInvoicePdf(
     page = doc.addPage([PAGE_W, PAGE_H]);
     pageNo += 1;
     y = PAGE_H - 40;
-    const label = `SERVICE INVOICE${data.po_number ? ` — PO ${data.po_number}` : ""} (continued, page ${pageNo})`;
+    const label = `${TITLE}${data.po_number ? ` — PO ${data.po_number}` : ""} (continued, page ${pageNo})`;
     page.drawText(label, { x: MARGIN, y: y - 8, font: bold, size: 10, color: GREEN_DARK });
     if (data.customer_company) {
       const w = font.widthOfTextAtSize(data.customer_company, 9);
@@ -272,7 +274,7 @@ export async function buildInvoicePdf(
   y -= 26;
 
   // --- title -----------------------------------------------------------------
-  centerText("SERVICE INVOICE", PAGE_W / 2, y, bold, 17, GREEN_DARK);
+  centerText(TITLE, PAGE_W / 2, y, bold, 17, GREEN_DARK);
 
   // Paid banner sits to the right of the title so nothing else has to move.
   if (showPaid) {
@@ -298,9 +300,14 @@ export async function buildInvoicePdf(
   // --- PO / Machine / Date ---------------------------------------------------
   const dateLabel = data.dates.length > 1 ? "Dates" : "Date";
   const dateValue = data.dates.map(usDate).join(", ");
-  labelRow("PO #", data.po_number ?? "", CONTENT_W * 0.48);
-  labelRow("Machine", data.machine_label ?? "", CONTENT_W * 0.48);
-  labelRow(dateLabel, dateValue, CONTENT_W * 0.48);
+  if (isQuote) {
+    labelRow("Date", dateValue, CONTENT_W * 0.48);
+    labelRow("Machine Type", data.machine_label ?? "", CONTENT_W * 0.48);
+  } else {
+    labelRow("PO #", data.po_number ?? "", CONTENT_W * 0.48);
+    labelRow("Machine", data.machine_label ?? "", CONTENT_W * 0.48);
+    labelRow(dateLabel, dateValue, CONTENT_W * 0.48);
+  }
 
   // --- PREPARED FOR ----------------------------------------------------------
   sectionHeading("PREPARED FOR");
@@ -334,7 +341,7 @@ export async function buildInvoicePdf(
   labelRow("Customer Phone", data.customer_phone ?? "", 110);
 
   // --- SUMMARY OF WORK PERFORMED --------------------------------------------
-  sectionHeading("SUMMARY OF WORK PERFORMED");
+  sectionHeading(isQuote ? "SUMMARY OF WORK" : "SUMMARY OF WORK PERFORMED");
   textBox(data.work_summary ?? "");
 
   // --- NOTES -----------------------------------------------------------------
@@ -372,14 +379,16 @@ export async function buildInvoicePdf(
   // long list of line items is allowed to break across pages.
   {
     const termsPreview = wrapText(
-      "Please make checks payable to JSW Solutions LLC. Payment required upon receipt. Minimum 4 hour service charge per day. Travel hours, per diem, and miles may be evenly split between multiple machines serviced on the same date. Credit card payments are accepted at www.jswsolutions.org/pay — a 3% credit card fee is added to card payments.",
+      isQuote
+        ? "This quote is an estimate for the work described above. Final invoicing reflects actual hours, travel, miles, and materials. Minimum 4 hour service charge per day."
+        : "Please make checks payable to JSW Solutions LLC. Payment required upon receipt. Minimum 4 hour service charge per day. Travel hours, per diem, and miles may be evenly split between multiple machines serviced on the same date. Credit card payments are accepted at www.jswsolutions.org/pay — a 3% credit card fee is added to card payments.",
       italic, 7.5, CONTENT_W - 40,
     ).length;
     const rowCount = Math.max(4, data.line_items.length);
     const whole = 24 + 20 + rowCount * 19 + 22 + 12 + termsPreview * 10; // heading included
     if (rowCount <= 10 && y - whole < BOTTOM) newPage();
   }
-  sectionHeading("LABOR INCLUDED");
+  sectionHeading(isQuote ? "ESTIMATED CHARGES" : "LABOR INCLUDED");
   tableHeader();
 
   // The template always shows its four standard rows; real line items replace
@@ -418,9 +427,10 @@ export async function buildInvoicePdf(
     y -= rowH;
   }
 
-  const terms =
-    "Please make checks payable to JSW Solutions LLC. Payment required upon receipt. Minimum 4 hour service charge per day. Travel hours, per diem, and miles may be evenly split between multiple machines serviced on the same date. " +
-    `Credit card payments are accepted at www.jswsolutions.org/pay — a ${CARD_FEE_PERCENT} credit card fee is added to card payments.`;
+  const terms = isQuote
+    ? "This quote is an estimate for the work described above. Final invoicing reflects actual hours, travel, miles, and materials. Minimum 4 hour service charge per day."
+    : "Please make checks payable to JSW Solutions LLC. Payment required upon receipt. Minimum 4 hour service charge per day. Travel hours, per diem, and miles may be evenly split between multiple machines serviced on the same date. " +
+      `Credit card payments are accepted at www.jswsolutions.org/pay — a ${CARD_FEE_PERCENT} credit card fee is added to card payments.`;
   const termLines = wrapText(terms, italic, 7.5, CONTENT_W - 40);
 
   // The total and the terms travel together — never let the total land on
@@ -441,7 +451,7 @@ export async function buildInvoicePdf(
       borderColor: GREEN_DARK,
       borderWidth: 0.6,
     });
-    rightText("Total Charge", xRate - 8, y - rowH + 7, bold, 10.5, WHITE);
+    rightText(isQuote ? "Total Quote" : "Total Charge", xRate - 8, y - rowH + 7, bold, 10.5, WHITE);
     cell(xRate, y, cRate, rowH, null);
     rightText(`$ ${money(data.total)}`, xRate + cRate - 6, y - rowH + 7, bold, 10, INK);
     y -= rowH;
@@ -484,5 +494,12 @@ export function invoicePdfFilename(data: InvoicePdfData, paidForm: boolean): str
     if (data.payment_method === "card") parts.push("Card");
     else if (data.check_number) parts.push(`Check ${safeName(data.check_number)}`);
   }
+  return `${parts.join(" - ")}.pdf`;
+}
+
+/** "Acme Mfg - Quote 11-11-2026.pdf" */
+export function quotePdfFilename(data: InvoicePdfData): string {
+  const parts = [safeName(data.customer_company || "Quote")];
+  parts.push(`Quote${data.dates[0] ? ` ${fileDate(data.dates[0])}` : ""}`);
   return `${parts.join(" - ")}.pdf`;
 }

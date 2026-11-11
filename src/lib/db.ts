@@ -99,6 +99,37 @@ export async function initSchema() {
   `;
   await sql`CREATE INDEX IF NOT EXISTS idx_email_log_invoice ON email_log(invoice_id);`;
 
+  // Quotes — same shape as an invoice minus PO/machine/paid. Sent before the
+  // work, so there's no mileage or income side to them.
+  await sql`
+    CREATE TABLE IF NOT EXISTS quotes (
+      id            SERIAL PRIMARY KEY,
+      customer_id   INTEGER REFERENCES customers(id) ON DELETE SET NULL,
+      quote_date    DATE,
+      work_summary  TEXT,
+      notes         TEXT,
+      total         NUMERIC(12,2) NOT NULL DEFAULT 0,
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS quote_items (
+      id            SERIAL PRIMARY KEY,
+      quote_id      INTEGER NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,
+      description   TEXT NOT NULL,
+      cost_per_hour NUMERIC(12,2),
+      qty           NUMERIC(12,2),
+      line_total    NUMERIC(12,2) NOT NULL DEFAULT 0,
+      sort_order    INTEGER NOT NULL DEFAULT 0
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_quotes_customer ON quotes(customer_id);`;
+  // Free-text machine type on a quote ("fiber laser", "CO2 laser + chiller") —
+  // a quote often comes before we know the exact machine.
+  await sql`ALTER TABLE quotes ADD COLUMN IF NOT EXISTS machine_type TEXT;`;
+  // Quote emails share the send log; one of invoice_id / quote_id is set.
+  await sql`ALTER TABLE email_log ADD COLUMN IF NOT EXISTS quote_id INTEGER REFERENCES quotes(id) ON DELETE CASCADE;`;
+
   await sql`
     CREATE TABLE IF NOT EXISTS mileage (
       id            SERIAL PRIMARY KEY,
@@ -593,15 +624,32 @@ export interface EmailLogRow {
 }
 
 export async function logEmail(entry: {
-  invoice_id: number;
+  invoice_id?: number | null;
+  quote_id?: number | null;
   kind: string;
   to_address: string;
   subject: string;
 }): Promise<void> {
   await sql`
-    INSERT INTO email_log (invoice_id, kind, to_address, subject)
-    VALUES (${entry.invoice_id}, ${entry.kind}, ${entry.to_address}, ${entry.subject});
+    INSERT INTO email_log (invoice_id, quote_id, kind, to_address, subject)
+    VALUES (${entry.invoice_id ?? null}, ${entry.quote_id ?? null}, ${entry.kind}, ${entry.to_address}, ${entry.subject});
   `;
+}
+
+export async function getQuoteEmailLog(quoteId: number): Promise<EmailLogRow[]> {
+  await initSchema();
+  const r = await sql`
+    SELECT id, kind, to_address, subject, to_char(sent_at, 'YYYY-MM-DD"T"HH24:MI:SSZ') AS sent_at
+    FROM email_log WHERE quote_id = ${quoteId}
+    ORDER BY sent_at DESC, id DESC;
+  `;
+  return r.rows.map((row) => ({
+    id: Number(row.id),
+    kind: row.kind as string,
+    to_address: row.to_address as string,
+    subject: row.subject as string,
+    sent_at: row.sent_at as string,
+  }));
 }
 
 export async function getEmailLog(invoiceId: number): Promise<EmailLogRow[]> {
@@ -764,4 +812,155 @@ export async function saveInvoice(
   }
 
   return invoiceId;
+}
+
+// ---- quotes -----------------------------------------------------------------
+
+export interface QuoteInput {
+  quote_date: string | null;
+  machine_type: string | null;
+  customer_company: string | null;
+  customer_contact: string | null;
+  customer_address: string | null;
+  customer_city: string | null;
+  customer_state: string | null;
+  customer_zip: string | null;
+  customer_phone: string | null;
+  customer_email: string | null;
+  work_summary: string | null;
+  notes: string | null;
+  line_items: {
+    description: string;
+    cost_per_hour: number | null;
+    qty: number | null;
+    line_total: number;
+  }[];
+  total: number;
+}
+
+/** Saves a quote, creating/backfilling the customer the same way invoices do. */
+export async function saveQuote(q: QuoteInput): Promise<number> {
+  await initSchema();
+  let customerId: number | null = null;
+  if (q.customer_company && q.customer_company.trim()) {
+    customerId = await upsertCustomer({
+      company: q.customer_company,
+      contact_name: q.customer_contact,
+      address: q.customer_address,
+      city: q.customer_city,
+      state: q.customer_state,
+      zip: q.customer_zip,
+      phone: q.customer_phone,
+      email: q.customer_email,
+    });
+  }
+  const r = await sql`
+    INSERT INTO quotes (customer_id, quote_date, machine_type, work_summary, notes, total)
+    VALUES (${customerId}, ${q.quote_date}, ${q.machine_type}, ${q.work_summary}, ${q.notes}, ${q.total})
+    RETURNING id;
+  `;
+  const quoteId = r.rows[0].id as number;
+  for (let i = 0; i < q.line_items.length; i++) {
+    const li = q.line_items[i];
+    await sql`
+      INSERT INTO quote_items (quote_id, description, cost_per_hour, qty, line_total, sort_order)
+      VALUES (${quoteId}, ${li.description}, ${li.cost_per_hour}, ${li.qty}, ${li.line_total}, ${i});
+    `;
+  }
+  return quoteId;
+}
+
+export async function deleteQuote(id: number): Promise<void> {
+  await initSchema();
+  await sql`DELETE FROM quotes WHERE id = ${id};`; // items + log rows cascade
+}
+
+export interface QuoteSummary {
+  id: number;
+  quote_date: string | null;
+  customer_company: string | null;
+  customer_id: number | null;
+  total: number;
+  emailed_at: string | null; // most recent send, if any
+}
+
+export async function listQuotes(search = ""): Promise<QuoteSummary[]> {
+  await initSchema();
+  const like = `%${search.trim()}%`;
+  const r = await sql`
+    SELECT q.id, to_char(q.quote_date, 'YYYY-MM-DD') AS quote_date, q.customer_id, q.total,
+           c.company,
+           (SELECT to_char(MAX(e.sent_at), 'YYYY-MM-DD') FROM email_log e WHERE e.quote_id = q.id) AS emailed_at
+    FROM quotes q
+    LEFT JOIN customers c ON c.id = q.customer_id
+    WHERE (${search} = '' OR c.company ILIKE ${like} OR q.work_summary ILIKE ${like})
+    ORDER BY q.quote_date DESC NULLS LAST, q.id DESC
+    LIMIT 500;
+  `;
+  return r.rows.map((row) => ({
+    id: Number(row.id),
+    quote_date: (row.quote_date as string) ?? null,
+    customer_company: (row.company as string) ?? null,
+    customer_id: row.customer_id == null ? null : Number(row.customer_id),
+    total: Number(row.total),
+    emailed_at: (row.emailed_at as string) ?? null,
+  }));
+}
+
+/** Everything the quote PDF + detail page need, in the same shape the invoice PDF uses. */
+export async function getQuoteForPdf(id: number): Promise<
+  | {
+      id: number;
+      customer_id: number | null;
+      quote_date: string | null;
+      pdf: import("./invoice-pdf").InvoicePdfData;
+    }
+  | null
+> {
+  await initSchema();
+  const r = await sql`
+    SELECT q.id, q.customer_id, to_char(q.quote_date, 'YYYY-MM-DD') AS quote_date,
+           q.machine_type, q.work_summary, q.notes, q.total,
+           c.company, c.contact_name, c.address, c.city, c.state, c.zip, c.phone
+    FROM quotes q
+    LEFT JOIN customers c ON c.id = q.customer_id
+    WHERE q.id = ${id} LIMIT 1;
+  `;
+  if (r.rows.length === 0) return null;
+  const row = r.rows[0];
+  const items = await sql`
+    SELECT description, cost_per_hour, qty, line_total
+    FROM quote_items WHERE quote_id = ${id} ORDER BY sort_order ASC;
+  `;
+  return {
+    id: Number(row.id),
+    customer_id: row.customer_id == null ? null : Number(row.customer_id),
+    quote_date: (row.quote_date as string) ?? null,
+    pdf: {
+      po_number: null,
+      // On a quote this slot carries the free-text machine type.
+      machine_label: (row.machine_type as string) ?? null,
+      dates: row.quote_date ? [row.quote_date as string] : [],
+      customer_company: (row.company as string) ?? null,
+      customer_contact: (row.contact_name as string) ?? null,
+      customer_address: (row.address as string) ?? null,
+      customer_city: (row.city as string) ?? null,
+      customer_state: (row.state as string) ?? null,
+      customer_zip: (row.zip as string) ?? null,
+      customer_phone: (row.phone as string) ?? null,
+      work_summary: (row.work_summary as string) ?? null,
+      notes: (row.notes as string) ?? null,
+      line_items: items.rows.map((li) => ({
+        description: li.description as string,
+        cost_per_hour: li.cost_per_hour == null ? null : Number(li.cost_per_hour),
+        qty: li.qty == null ? null : Number(li.qty),
+        line_total: Number(li.line_total),
+      })),
+      total: Number(row.total),
+      paid: false,
+      paid_date: null,
+      check_number: null,
+      payment_method: null,
+    },
+  };
 }

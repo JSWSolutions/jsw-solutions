@@ -27,6 +27,7 @@ export default function DashboardLayout({
             <NavLink href="/dashboard" label="Overview" exact />
             <NavLink href="/dashboard/invoices" label="Invoices" />
             <NavLink href="/dashboard/unpaid" label="Unpaid" />
+            <NavLink href="/dashboard/quotes" label="Quotes" />
             <NavLink href="/dashboard/mileage" label="Mileage" />
             <NavLink href="/dashboard/customers" label="Customers" />
             <NavLink href="/dashboard/machines" label="Machines" />
@@ -35,6 +36,12 @@ export default function DashboardLayout({
               className="mt-3 block rounded-md bg-brand-orange px-3 py-2 text-center text-sm font-semibold text-white hover:bg-brand-orange-dark"
             >
               + New Invoice
+            </Link>
+            <Link
+              href="/dashboard/quotes/new"
+              className="mt-2 block rounded-md border border-brand-orange px-3 py-2 text-center text-sm font-semibold text-brand-orange hover:bg-brand-orange hover:text-white"
+            >
+              + New Quote
             </Link>
           </nav>
           <div className="mt-4">
@@ -60,7 +67,7 @@ export default function DashboardLayout({
           <div className="mx-auto max-w-6xl p-4 md:p-8">{children}</div>
           {/* Version stamp — tells us at a glance which build is actually live. */}
           <p className="px-4 pb-4 text-center text-[10px] text-slate-300 md:px-8">
-            dashboard v2026-11-10.1
+            dashboard v2026-11-11.3
           </p>
         </main>
       </div>

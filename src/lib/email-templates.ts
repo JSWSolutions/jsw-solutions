@@ -209,6 +209,32 @@ export function thanksEmail(d: InvoicePdfData): EmailContent {
 }
 
 // ---------------------------------------------------------------------------
+// QUOTE — the quote PDF is attached
+// ---------------------------------------------------------------------------
+export function quoteEmail(d: InvoicePdfData): EmailContent {
+  const co = d.customer_company ?? "your company";
+  const subject = `Quote from JSW Solutions — ${co}`;
+
+  const text =
+    [
+      "Thank you for the opportunity. Please see the attached quote for the work we discussed.",
+      "",
+      "If you'd like to move forward, or have any questions about the quote, please don't hesitate to reach out.",
+      "",
+      "Thank you!",
+      "",
+      signatureText(),
+    ].join("\n") + textTail();
+
+  const html = shell(`
+    <p>Thank you for the opportunity. Please see the attached quote for the work we discussed.</p>
+    <p>If you'd like to move forward, or have any questions about the quote, please don't hesitate to reach out.</p>
+    <p>Thank you!</p>
+  `);
+  return { subject, text, html };
+}
+
+// ---------------------------------------------------------------------------
 // BUNDLES — several invoices for the same customer in one email. The body
 // lists each invoice and the combined total; every PDF rides along.
 // ---------------------------------------------------------------------------
